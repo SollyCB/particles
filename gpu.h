@@ -14,30 +14,19 @@ extern u32 frm_i; // frame index, is either 0 or 1
 enum {
     DB_SI_T, // transfer complete
     DB_SI_G, // color output complete
-    DB_SI_I, // glyph upload
     DB_SEM_CNT,
 };
 
 #define GPU_MAX_CMDS 16
 
-enum gpu_flags {
-    GPU_MEM_INI = 0x01, // mem.type is valid
-    GPU_MEM_UNI = 0x02, // mem arch is unified
-    GPU_MEM_OFS = 0x04, // buffers use the top half this frame
-    
-    GPU_MEM_BITS = GPU_MEM_INI|GPU_MEM_UNI,
-};
-
 enum gpu_mem_indices {
-    GPU_MI_G,
+    GPU_MI_V,
     GPU_MI_T,
-    GPU_MI_I,
-    GPU_MI_R, // msaa render target
     GPU_MEM_CNT,
 };
 
 enum gpu_buf_indices {
-    GPU_BI_G,
+    GPU_BI_V,
     GPU_BI_T,
     GPU_BUF_CNT,
 };
@@ -77,10 +66,7 @@ struct gpu {
         } cmd[FRAME_WRAP];
     } q[GPU_Q_CNT];
     
-    struct {
-        VkDeviceMemory handle;
-        u32 type;
-    } mem[GPU_MEM_CNT];
+    VkDeviceMemory mem[GPU_MEM_CNT];
     
     struct {
         VkBuffer handle;
@@ -89,14 +75,19 @@ struct gpu {
         u64 used;
     } buf[GPU_BUF_CNT];
     
+    u32 buffer_size; // true buffer size is double this, but buffers are split in half per frame
+    
     struct {
         VkSwapchainKHR handle;
         VkSwapchainCreateInfoKHR info;
+        
         struct {
             VkImage img;
             VkImageView view;
         } att[SC_MAX_IMGS];
+        
         u32 img_cnt,i;
+        
         struct {
             u32 i;
             VkSemaphore sem;
@@ -117,18 +108,16 @@ struct gpu {
     VkDescriptorPool dp;
     VkDescriptorSet ds;
     
-    VkSampler sampler;
-    
     struct {
         struct {
             struct rgba col;
-            float pos[3][3];
-        } obj[10];
+            struct offset_u16 pos;
+        } *elem; // pointer into transfer/vertex buffer
         
         u32 used;
-        
         VkFence fence[FRAME_WRAP];
-        VkSemaphore sem[FRAME_WRAP];
+        
+        VkSemaphore sem[FRAME_WRAP][GPU_BUF_CNT];
         
     } draw;
 };
@@ -145,14 +134,14 @@ def_gpu_create_sh(gpu_create_sh);
 #define def_gpu_handle_win_resize(name) int name(void)
 def_gpu_handle_win_resize(gpu_handle_win_resize);
 
+#define def_gpu_add_draw_elem(name) int name(struct rgba col, struct offset_u16 pos)
+def_gpu_add_draw_elem(gpu_add_draw_elem);
+
+#define def_gpu_draw(name) int name(void)
+def_gpu_draw(gpu_draw);
+
 #define def_gpu_update(name) int name(void)
 def_gpu_update(gpu_update);
-
-#define def_gpu_db_add(name) int name(struct rect_u16 rect, struct rgba fg, struct rgba bg)
-def_gpu_db_add(gpu_db_add);
-
-#define def_gpu_db_flush(name) int name(void)
-def_gpu_db_flush(gpu_db_flush);
 
 #define def_gpu_check_leaks(name) void name(void)
 def_gpu_check_leaks(gpu_check_leaks);
@@ -179,12 +168,11 @@ union gpu_memreq_info {
 };
 
 enum cell_vertex_fmts {
-    CELL_POS_FMT = VK_FORMAT_R32G32B32_SFLOAT,
+    CELL_POS_FMT = VK_FORMAT_R16G16_UNORM,
     CELL_COL_FMT = VK_FORMAT_R8G8B8A8_UNORM,
 };
 
 enum gpu_fb_attachment_indices {
-    GPU_FB_AI_MSAA, // msaa color
     GPU_FB_AI_SWAP, // swapchain image resolve
 };
 
@@ -192,9 +180,16 @@ extern u32 gpu_ci_to_qi[GPU_CMD_CNT];
 extern char* gpu_mem_names[GPU_MEM_CNT];
 extern char *gpu_cmdq_names[GPU_CMD_CNT];
 
+#define gpu_que(qi) gpu->q[qi]
+#define gpu_mem(mi) gpu->mem[mi]
+#define gpu_buf(bi) gpu->buf[bi]
 #define gpu_buf_name(bi) gpu_mem_names[bi]
 #define gpu_cmd_name(ci) gpu_cmdq_names[ci]
 #define gpu_cmd(ci) gpu->q[gpu_ci_to_qi[ci]].cmd[frm_i]
+
+#define gpu_sc_map gpu->sc.map[gpu->sc.i]
+#define gpu_sc_sem gpu->sc.map[gpu->sc.i].sem
+#define gpu_draw_sem(bi) gpu->draw.sem[frm_i][bi]
 
 #endif // ifdef LIB
 

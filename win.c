@@ -36,7 +36,21 @@ def_create_win(create_win)
                                    SDL_WINDOWPOS_CENTERED,
                                    win->dim.w, win->dim.h,
                                    SDL_WINDOW_VULKAN|SDL_WINDOW_RESIZABLE);
-    return win->handle ? 0 : -1;
+    
+    if (!win->handle) {
+        log_error("Failed to create window");
+        return -1;
+    }
+    
+    SDL_DisplayMode dm;
+    if (SDL_GetDesktopDisplayMode(0, &dm)) {
+        log_error("Failed to get screen extent");
+        return -1;
+    }
+    win->max.w = (u16)dm.w;
+    win->max.h = (u16)dm.h;
+    
+    return 0;
 }
 
 def_win_inst_exts(win_inst_exts)
@@ -143,18 +157,6 @@ def_win_kb_next(win_kb_next)
     win->kb.read = win_kb_inc(win->kb.read);
     *ki = win->kb.buf[win->kb.read];
     return true;
-}
-
-def_win_screen_extent(win_screen_extent)
-{
-    SDL_DisplayMode dm;
-    if (SDL_GetDesktopDisplayMode(0, &dm)) {
-        log_error("Failed to get screen extent");
-        return -1;
-    }
-    e->w = dm.w;
-    e->h = dm.h;
-    return 0;
 }
 
 // @TODO This needs to be a table index rather than a switch

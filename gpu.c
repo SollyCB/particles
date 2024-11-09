@@ -1,9 +1,8 @@
-#include "external/stb_truetype.h"
-
 #include "prg.h"
 #include "win.h"
 #include "gpu.h"
 #include "shader.h"
+#include "world.h"
 
 struct gpu *gpu;
 
@@ -14,7 +13,7 @@ static inline void gpu_inc_frame(void)
 }
 
 char* gpu_mem_names[GPU_MEM_CNT] = {
-    [GPU_MI_G] = "Vertex",
+    [GPU_MI_V] = "Vertex",
     [GPU_MI_T] = "Transfer",
 };
 
@@ -28,33 +27,6 @@ u32 gpu_ci_to_qi[GPU_CMD_CNT] = {
     [GPU_CI_G] = GPU_QI_G,
     [GPU_CI_T] = GPU_QI_T,
 };
-
-internal int gpu_memreq_helper(union gpu_memreq_info info, u32 i, VkMemoryRequirements *mr)
-{
-    switch(i) {
-        case GPU_MI_R:
-        case GPU_MI_I: {
-            VkImage img;
-            if (vk_create_img(info.img, &img))
-                break;
-            vk_get_img_memreq(img, mr);
-            vk_destroy_img(img);
-        } return 0;
-        
-        case GPU_MI_G:
-        case GPU_MI_T: {
-            VkBuffer buf;
-            if (vk_create_buf(info.buf, &buf))
-                break;
-            vk_get_buf_memreq(buf, mr);
-            vk_destroy_buf(buf);
-        } return 0;
-        
-        default: invalid_default_case;
-    }
-    log_error("Failed to create dummy object for getting memory requirements (%s)", gpu_mem_names[i]);
-    return -1;
-}
 
 internal u32 gpu_memtype_helper(u32 type_bits, u32 req)
 {
@@ -107,6 +79,134 @@ internal u64 gpu_bufcpy(VkCommandBuffer cmd, u64 ofs, u64 sz, u32 bi_from, u32 b
     
     vk_cmd_bufcpy(cmd, 1, &r, gpu->buf[bi_from].handle, gpu->buf[bi_to].handle);
     return r.dstOffset;
+}
+
+internal int gpu_create_draw_objs(void)
+{
+    gpu->buffer_size = sizeof(*gpu->draw.elem) * win->max.w * win->max.h;
+    
+    if (gpu->props.deviceType == VK_PHYSICAL_DEVICE_TYPE_DISCRETE_GPU) {
+        VkBufferCreateInfo ci = {VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO};
+        ci.size = gpu->buffer_size * FRAME_WRAP;
+        ci.usage = VK_BUFFER_USAGE_VERTEX_BUFFER_BIT|VK_BUFFER_USAGE_TRANSFER_DST_BIT;
+        
+        if (vk_create_buf(&ci, &gpu_buf(GPU_BI_V).handle)) {
+            log_error("Failed to create vertex buffer");
+            return -1;
+        }
+        
+        u32 req = VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT;
+        
+        VkMemoryRequirements mr;
+        vk_get_buf_memreq(gpu_buf(GPU_BI_V).handle, &mr);
+        
+        VkMemoryAllocateInfo ai = {VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO};
+        ai.allocationSize = mr.size;
+        ai.memoryTypeIndex = gpu_memtype_helper(mr.memoryTypeBits, req);
+        
+        if (vk_alloc_mem(&ai, &gpu_mem(GPU_MI_V))) {
+            log_error("Failed to allocate vertex buffer memory");
+            return -1;
+        }
+        if (vk_bind_buf_mem(gpu_buf(GPU_BI_V).handle, gpu_mem(GPU_MI_V), 0)) {
+            log_error("Failed to bind vertex memory");
+            return -1;
+        }
+        
+        VkBufferCreateInfo tci = {VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO};
+        tci.size = gpu->buffer_size * FRAME_WRAP;
+        tci.usage = VK_BUFFER_USAGE_TRANSFER_SRC_BIT;
+        
+        if (vk_create_buf(&tci, &gpu_buf(GPU_BI_T).handle)) {
+            log_error("Failed to create transfer buffer");
+            return -1;
+        }
+        
+        u32 treq = VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT|VK_MEMORY_PROPERTY_HOST_COHERENT_BIT;
+        
+        VkMemoryRequirements tmr;
+        vk_get_buf_memreq(gpu_buf(GPU_BI_T).handle, &tmr);
+        
+        VkMemoryAllocateInfo tai = {VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO};
+        tai.allocationSize = tmr.size;
+        tai.memoryTypeIndex = gpu_memtype_helper(tmr.memoryTypeBits, treq);
+        
+        if (vk_alloc_mem(&tai, &gpu_mem(GPU_MI_T))) {
+            log_error("Failed to allocate transfer buffer memory");
+            return -1;
+        }
+        if (vk_map_mem(gpu_mem(GPU_MI_T), 0, tmr.size, &gpu_buf(GPU_BI_T).data)) {
+            log_error("Failed to map transfer mem");
+            return -1;
+        }
+        if (vk_bind_buf_mem(gpu_buf(GPU_BI_T).handle, gpu_mem(GPU_MI_T), 0)) {
+            log_error("Failed to bind transfer memory");
+            return -1;
+        }
+        gpu->draw.elem = gpu_buf(GPU_BI_T).data;
+    } else {
+        VkBufferCreateInfo ci = {VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO};
+        ci.size = gpu->buffer_size * FRAME_WRAP;
+        ci.usage = VK_BUFFER_USAGE_VERTEX_BUFFER_BIT;
+        
+        if (vk_create_buf(&ci, &gpu_buf(GPU_BI_V).handle)) {
+            log_error("Failed to create vertex buffer");
+            return -1;
+        }
+        
+        u32 req = VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT|VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT|VK_MEMORY_PROPERTY_HOST_COHERENT_BIT;
+        
+        VkMemoryRequirements mr;
+        vk_get_buf_memreq(gpu_buf(GPU_BI_V).handle, &mr);
+        
+        VkMemoryAllocateInfo ai = {VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO};
+        ai.allocationSize = mr.size;
+        ai.memoryTypeIndex = gpu_memtype_helper(mr.memoryTypeBits, req);
+        
+        if (vk_alloc_mem(&ai, &gpu_mem(GPU_MI_V))) {
+            log_error("Failed to allocate vertex buffer memory");
+            return -1;
+        }
+        if (vk_map_mem(gpu_mem(GPU_MI_V), 0, mr.size, &gpu_buf(GPU_BI_V).data)) {
+            log_error("Failed to map vertex mem");
+            return -1;
+        }
+        if (vk_bind_buf_mem(gpu_buf(GPU_BI_V).handle, gpu_mem(GPU_MI_V), 0)) {
+            log_error("Failed to bind vertex memory");
+            return -1;
+        }
+        gpu->draw.elem = gpu_buf(GPU_BI_V).data;
+    }
+    
+    for(u32 i=0; i < cl_array_size(gpu->draw.fence); ++i)
+        vk_create_fence(true, &gpu->draw.fence[i]);
+    
+    for(u32 i=0; i < cl_array_size(gpu->draw.sem); ++i) {
+        for(u32 j=0; j < cl_array_size(gpu->draw.sem[i]); ++j)
+            vk_create_sem(&gpu->draw.sem[i][j]);
+    }
+    
+    for(u32 i=0; i < cl_array_size(gpu_que(GPU_QI_G).cmd); ++i) {
+        VkCommandPoolCreateInfo ci = {VK_STRUCTURE_TYPE_COMMAND_POOL_CREATE_INFO};
+        ci.queueFamilyIndex = gpu_que(GPU_QI_G).i;
+        if (vk_create_cmdpool(&ci, &gpu_que(GPU_QI_G).cmd[i].pool)) {
+            log_error("Failed to create graphics command pool");
+            return -1;
+        }
+    }
+    
+    if (gpu->props.deviceType == VK_PHYSICAL_DEVICE_TYPE_DISCRETE_GPU) {
+        for(u32 i=0; i < cl_array_size(gpu_que(GPU_QI_T).cmd); ++i) {
+            VkCommandPoolCreateInfo ci = {VK_STRUCTURE_TYPE_COMMAND_POOL_CREATE_INFO};
+            ci.queueFamilyIndex = gpu_que(GPU_QI_T).i;
+            if (vk_create_cmdpool(&ci, &gpu_que(GPU_QI_T).cmd[i].pool)) {
+                log_error("Failed to create graphics command pool");
+                return -1;
+            }
+        }
+    }
+    
+    return 0;
 }
 
 internal u32 gpu_alloc_cmds(u32 ci, u32 cnt)
@@ -281,6 +381,7 @@ internal VkShaderModule gpu_create_shader(struct string spv)
 
 internal int gpu_create_dsl(void)
 {
+#if GPU_DS
     local_persist VkDescriptorSetLayoutBinding b = {
         .binding = SH_SI_SET,
         .descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
@@ -295,6 +396,7 @@ internal int gpu_create_dsl(void)
     
     if (vk_create_dsl(&ci, &gpu->dsl))
         return -1;
+#endif
     
     return 0;
 }
@@ -303,8 +405,10 @@ internal int gpu_create_pll(void)
 {
     VkPipelineLayoutCreateInfo ci = {
         .sType = VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO,
+#if GPU_DS
         .setLayoutCount = 1,
         .pSetLayouts = &gpu->dsl,
+#endif
     };
     
     if (vk_create_pll(&ci, &gpu->pll))
@@ -315,6 +419,7 @@ internal int gpu_create_pll(void)
 
 internal int gpu_create_ds(void)
 {
+#if GPU_DS
     if (gpu->dp == VK_NULL_HANDLE) { // runs once per program
         local_persist VkDescriptorPoolSize sz = {
             .type = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
@@ -343,7 +448,6 @@ internal int gpu_create_ds(void)
         return -1;
     }
     
-#if GPU_DS
     VkDescriptorImageInfo ii[CHT_SZ] = {
         {
             .sampler = gpu->sampler,
@@ -372,59 +476,6 @@ internal int gpu_create_ds(void)
 
 internal int gpu_create_rp(void)
 {
-#if MSAA
-    local_persist VkAttachmentDescription a[] = {
-        [GPU_FB_AI_MSAA] = {
-            .loadOp = VK_ATTACHMENT_LOAD_OP_CLEAR,
-            .storeOp = VK_ATTACHMENT_STORE_OP_STORE, // TODO(SollyCB): I think this can be store don't care
-            .stencilLoadOp = VK_ATTACHMENT_LOAD_OP_DONT_CARE,
-            .stencilStoreOp = VK_ATTACHMENT_STORE_OP_DONT_CARE,
-            .initialLayout = VK_IMAGE_LAYOUT_UNDEFINED,
-            .finalLayout = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL,
-        },
-        [GPU_FB_AI_SWAP] = {
-            .samples = VK_SAMPLE_COUNT_1_BIT,
-            .loadOp = VK_ATTACHMENT_LOAD_OP_DONT_CARE,
-            .storeOp = VK_ATTACHMENT_STORE_OP_STORE,
-            .stencilLoadOp = VK_ATTACHMENT_LOAD_OP_DONT_CARE,
-            .stencilStoreOp = VK_ATTACHMENT_STORE_OP_DONT_CARE,
-            .initialLayout = VK_IMAGE_LAYOUT_UNDEFINED,
-            .finalLayout = VK_IMAGE_LAYOUT_PRESENT_SRC_KHR,
-        }
-    };
-    
-    local_persist VkAttachmentReference ar[] = {
-        [GPU_FB_AI_MSAA] = {
-            .attachment = GPU_FB_AI_MSAA,
-            .layout = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL,
-        },
-        [GPU_FB_AI_SWAP] = {
-            .attachment = GPU_FB_AI_SWAP,
-            .layout = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL,
-        }
-    };
-    
-    local_persist VkSubpassDescription s = {
-        .pipelineBindPoint = VK_PIPELINE_BIND_POINT_GRAPHICS,
-        .colorAttachmentCount = 1,
-        .pColorAttachments = &ar[GPU_FB_AI_MSAA],
-        .pResolveAttachments = &ar[GPU_FB_AI_SWAP],
-    };
-    
-    local_persist VkSubpassDependency d = {
-        .srcSubpass = VK_SUBPASS_EXTERNAL,
-        .dstSubpass = 0,
-        .srcStageMask = VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT,
-        .dstStageMask = VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT,
-        .srcAccessMask = VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT,
-        .dstAccessMask = VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT,
-        .dependencyFlags = VK_DEPENDENCY_BY_REGION_BIT,
-    };
-    
-    a[GPU_FB_AI_MSAA].format = gpu->sc.info.imageFormat;
-    a[GPU_FB_AI_SWAP].format = gpu->sc.info.imageFormat;
-    a[GPU_FB_AI_MSAA].samples = gpu->db.msaa_samples;
-#else
     local_persist VkAttachmentDescription a[] = {
         {
             .samples = VK_SAMPLE_COUNT_1_BIT,
@@ -461,7 +512,6 @@ internal int gpu_create_rp(void)
     };
     
     a[0].format = gpu->sc.info.imageFormat;
-#endif
     
     VkRenderPassCreateInfo ci = {
         .sType = VK_STRUCTURE_TYPE_RENDER_PASS_CREATE_INFO,
@@ -484,16 +534,9 @@ internal int gpu_next_fb(void)
     if (gpu->fb[frm_i] != VK_NULL_HANDLE)
         vk_destroy_fb(gpu->fb[frm_i]);
     
-#if MSAA
-    VkImageView a[] = {
-        [GPU_FB_AI_MSAA] = gpu->db.view[frm_i],
-        [GPU_FB_AI_SWAP] = gpu->sc.views[gpu->sc.img_i[gpu->sc.i]],
-    };
-#else
     VkImageView a[] = {
         sc_att.view,
     };
-#endif
     
     VkFramebufferCreateInfo ci = {VK_STRUCTURE_TYPE_FRAMEBUFFER_CREATE_INFO};
     ci.layers = 1,
@@ -522,7 +565,7 @@ internal int gpu_create_pl(void)
     
     local_persist VkVertexInputBindingDescription vi_b = {
         .binding = 0,
-        .stride = sizeof(*gpu->draw.obj),
+        .stride = sizeof(*gpu->draw.elem),
         .inputRate = VK_VERTEX_INPUT_RATE_INSTANCE,
     };
     
@@ -530,12 +573,12 @@ internal int gpu_create_pl(void)
         [SH_COL_LOC] = {
             .location = SH_COL_LOC,
             .format = CELL_COL_FMT,
-            .offset = offsetof(typeof(*gpu->draw.obj), col),
+            .offset = offsetof(typeof(*gpu->draw.elem), col),
         },
         [SH_POS_LOC] = {
             .location = SH_POS_LOC,
             .format = CELL_POS_FMT,
-            .offset = offsetof(typeof(*gpu->draw.obj), pos),
+            .offset = offsetof(typeof(*gpu->draw.elem), pos),
         },
     };
     
@@ -549,13 +592,13 @@ internal int gpu_create_pl(void)
     
     local_persist VkPipelineInputAssemblyStateCreateInfo ia = {
         .sType = VK_STRUCTURE_TYPE_PIPELINE_INPUT_ASSEMBLY_STATE_CREATE_INFO,
-        .topology = VK_PRIMITIVE_TOPOLOGY_TRIANGLE_LIST,
+        .topology = VK_PRIMITIVE_TOPOLOGY_POINT_LIST,
     };
     
     local_persist VkViewport view = {
         .x = 0,
         .y = 0,
-        .width = 640,
+        .width = 640, // set dynamically
         .height = 480,
         .minDepth = 0,
         .maxDepth = 1,
@@ -584,11 +627,7 @@ internal int gpu_create_pl(void)
         .minSampleShading = 0.2f,
     };
     
-#if MSAA
-    ms.rasterizationSamples = gpu->db.msaa_samples;
-#else
     ms.rasterizationSamples = VK_SAMPLE_COUNT_1_BIT;
-#endif
     
     local_persist VkPipelineDepthStencilStateCreateInfo ds = {
         .sType = VK_STRUCTURE_TYPE_PIPELINE_DEPTH_STENCIL_STATE_CREATE_INFO,
@@ -725,6 +764,8 @@ def_create_gpu(create_gpu)
             log_error("Failed to find device with appropriate type");
             return -1;
         }
+        
+        vk_get_phys_dev_memprops(gpu->phys_dev, &gpu->memprops);
 #undef MAX_DEVICE_COUNT
     }
     
@@ -892,6 +933,7 @@ def_create_gpu(create_gpu)
     gpu_create_ds();
     gpu_create_rp();
     gpu_create_pl();
+    gpu_create_draw_objs();
     
     return 0;
 }
@@ -1002,8 +1044,196 @@ def_gpu_handle_win_resize(gpu_handle_win_resize)
     return 0;
 }
 
+def_gpu_add_draw_elem(gpu_add_draw_elem)
+{
+    if (gpu->draw.used >= (u32)win->max.w * win->max.h) {
+        log_error("Gpu draw buffer overflow");
+        return -1;
+    }
+    
+    gpu->draw.elem[gpu->draw.used].col = col;
+    gpu->draw.elem[gpu->draw.used].pos = pos;
+    ++gpu->draw.used;
+    
+    return 0;
+}
+
+def_gpu_draw(gpu_draw)
+{
+    VkCommandBuffer cmd;
+    {
+        u32 i = gpu_alloc_cmds(GPU_CI_G, 1);
+        if (i == Max_u32) {
+            log_error("Failed to allocate graphics command buffer");
+            return -1;
+        }
+        cmd = gpu_cmd(GPU_CI_G).bufs[i];
+        
+        vk_begin_cmd(cmd, true);
+    }
+    
+    VkBufferCopy reg;
+    reg.srcOffset = gpu->buffer_size * frm_i;
+    reg.dstOffset = gpu->buffer_size * frm_i;
+    reg.size = gpu->draw.used * sizeof(*gpu->draw.elem);
+    
+    if (gpu->props.deviceType == VK_PHYSICAL_DEVICE_TYPE_DISCRETE_GPU) {
+        if (gpu_que(GPU_QI_G).i == gpu_que(GPU_QI_T).i) {
+            vk_cmd_bufcpy(cmd, 1, &reg, gpu_buf(GPU_BI_T).handle, gpu_buf(GPU_BI_V).handle);
+            
+            VkMemoryBarrier2 b = {VK_STRUCTURE_TYPE_MEMORY_BARRIER_2};
+            b.srcStageMask = VK_PIPELINE_STAGE_2_TRANSFER_BIT;
+            b.srcAccessMask = VK_ACCESS_2_MEMORY_WRITE_BIT_KHR;
+            b.dstStageMask = VK_PIPELINE_STAGE_2_VERTEX_ATTRIBUTE_INPUT_BIT;
+            b.dstAccessMask = VK_ACCESS_2_MEMORY_READ_BIT;
+            
+            VkDependencyInfo dep = {VK_STRUCTURE_TYPE_DEPENDENCY_INFO};
+            dep.memoryBarrierCount = 1;
+            dep.pMemoryBarriers = &b;
+            
+            vk_cmd_pl_barr(cmd, &dep);
+        } else {
+            VkCommandBuffer tcmd;
+            {
+                u32 i = gpu_alloc_cmds(GPU_CI_T, 1);
+                if (i == Max_u32) {
+                    log_error("Failed to allocate transfer command buffer");
+                    return -1;
+                }
+                tcmd = gpu_cmd(GPU_CI_T).bufs[i];
+                vk_begin_cmd(tcmd, true);
+            }
+            
+            vk_cmd_bufcpy(tcmd, 1, &reg, gpu_buf(GPU_BI_T).handle, gpu_buf(GPU_BI_V).handle);
+            
+            VkBufferMemoryBarrier2 b = {VK_STRUCTURE_TYPE_BUFFER_MEMORY_BARRIER_2};
+            b.srcStageMask = VK_PIPELINE_STAGE_2_TRANSFER_BIT_KHR;
+            b.srcAccessMask = VK_ACCESS_2_MEMORY_WRITE_BIT_KHR;
+            b.srcQueueFamilyIndex = gpu_que(GPU_QI_T).i;
+            b.dstQueueFamilyIndex = gpu_que(GPU_QI_G).i;
+            b.buffer = gpu_buf(GPU_BI_V).handle;
+            b.offset = gpu->buffer_size * frm_i;
+            b.size = gpu->buffer_size;
+            
+            VkDependencyInfoKHR dep = {VK_STRUCTURE_TYPE_DEPENDENCY_INFO};
+            dep.bufferMemoryBarrierCount = 1;
+            dep.pBufferMemoryBarriers = &b;
+            
+            vk_cmd_pl_barr(tcmd, &dep);
+            
+            vk_end_cmd(tcmd);
+            
+            b.srcStageMask = 0x0,
+            b.srcAccessMask = 0x0,
+            b.dstStageMask = VK_PIPELINE_STAGE_2_VERTEX_ATTRIBUTE_INPUT_BIT_KHR,
+            b.dstAccessMask = VK_ACCESS_2_MEMORY_READ_BIT_KHR,
+            
+            vk_cmd_pl_barr(cmd, &dep);
+            
+            VkSubmitInfo tsi = {VK_STRUCTURE_TYPE_SUBMIT_INFO};
+            tsi.commandBufferCount = 1;
+            tsi.pCommandBuffers = &tcmd;
+            tsi.signalSemaphoreCount = 1;
+            tsi.pSignalSemaphores = &gpu_draw_sem(GPU_BI_T);
+            
+            if (vk_qsub(gpu_que(GPU_QI_T).handle, 1, &tsi, VK_NULL_HANDLE)) {
+                log_error("Failed to submit transfer commands");
+                return -1;
+            }
+        }
+    }
+    
+    u64 ofs = 0;
+    
+    VkViewport vp = {};
+    vp.width = win->dim.w;
+    vp.height = win->dim.h;
+    vp.minDepth = 0.0f;
+    vp.maxDepth = 1.0f;
+    
+    VkRect2D sc = {};
+    sc.extent.width = win->dim.w;
+    sc.extent.height = win->dim.h;
+    
+    VkClearValue cv = {};
+    
+    VkRenderPassBeginInfo rbi = {VK_STRUCTURE_TYPE_RENDER_PASS_BEGIN_INFO};
+    rbi.renderPass = gpu->rp;
+    rbi.framebuffer = gpu->fb[frm_i];
+    rbi.renderArea = sc;
+    rbi.clearValueCount = 1;
+    rbi.pClearValues = &cv;
+    
+    VkSubpassBeginInfo sbi = {VK_STRUCTURE_TYPE_SUBPASS_BEGIN_INFO};
+    sbi.contents = VK_SUBPASS_CONTENTS_INLINE;
+    
+    vk_cmd_set_viewport(cmd, 0, 1, &vp);
+    vk_cmd_set_scissor(cmd, 0, 1, &sc);
+    vk_cmd_bind_pl(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, gpu->pl);
+    vk_cmd_bind_vb(cmd, 0, 1, &gpu_buf(GPU_BI_V).handle, &ofs);
+    
+    vk_cmd_begin_rp(cmd, &rbi, &sbi);
+    vk_cmd_draw(cmd, 1, gpu->draw.used);
+    vk_cmd_end_rp(cmd);
+    
+    vk_end_cmd(cmd);
+    
+    if (gpu->props.deviceType == VK_PHYSICAL_DEVICE_TYPE_DISCRETE_GPU) {
+        
+        VkSemaphore w_sem[] = {gpu_draw_sem(GPU_BI_T), gpu_sc_sem};
+        VkPipelineStageFlags w_stg[] = {VK_PIPELINE_STAGE_VERTEX_INPUT_BIT, VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT};
+        
+        VkSubmitInfo si = {VK_STRUCTURE_TYPE_SUBMIT_INFO};
+        si.waitSemaphoreCount = 2;
+        si.pWaitSemaphores = w_sem;
+        si.pWaitDstStageMask = w_stg;
+        si.commandBufferCount = 1;
+        si.pCommandBuffers = &cmd;
+        si.signalSemaphoreCount = 1;
+        si.pSignalSemaphores = &gpu_draw_sem(GPU_BI_V);
+        
+        if (vk_qsub(gpu_que(GPU_QI_G).handle, 1, &si, VK_NULL_HANDLE)) {
+            log_error("Failed to submit graphics commands");
+            return -1;
+        }
+    } else {
+        VkPipelineStageFlags w_stg = VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT;
+        
+        VkSubmitInfo si = {VK_STRUCTURE_TYPE_SUBMIT_INFO};
+        si.waitSemaphoreCount = 1;
+        si.pWaitSemaphores = &gpu_sc_sem;
+        si.pWaitDstStageMask = &w_stg;
+        si.commandBufferCount = 1;
+        si.pCommandBuffers = &cmd;
+        si.signalSemaphoreCount = 1;
+        si.pSignalSemaphores = &gpu_draw_sem(GPU_BI_V);
+        
+        if (vk_qsub(gpu_que(GPU_QI_G).handle, 1, &si, gpu->draw.fence[frm_i])) {
+            log_error("Failed to submit graphics commands");
+            return -1;
+        }
+    }
+    
+    VkPresentInfoKHR pi = {VK_STRUCTURE_TYPE_PRESENT_INFO_KHR};
+    pi.waitSemaphoreCount = 1;
+    pi.pWaitSemaphores = &gpu_draw_sem(GPU_BI_V);
+    pi.swapchainCount = 1;
+    pi.pSwapchains = &gpu->sc.handle;
+    pi.pImageIndices = &gpu_sc_map.i;
+    pi.pResults = VK_NULL_HANDLE;
+    
+    if (vk_qpres(&pi)) {
+        log_error("Failed to present to swapchain");
+        return -1;
+    }
+    
+    return 0;
+}
+
 def_gpu_update(gpu_update)
 {
+    gpu_add_draw_elem(RGBA(255, 0, 0, 255), OFFSET_U16(32000,32000));
+    
     if (gpu->draw.used == 0)
         return 0;
     
@@ -1018,287 +1248,15 @@ def_gpu_update(gpu_update)
         return -1;
     }
     for(u32 i=0; i < GPU_CMD_CNT; ++i) {
+        if (gpu->props.deviceType == VK_PHYSICAL_DEVICE_TYPE_INTEGRATED_GPU && i == GPU_CI_T)
+            continue;
         vk_reset_cmdpool(gpu_cmd(i).pool, 0x0);
         gpu_dealloc_cmds(i);
     }
     
-    for(u32 i=0; i < GPU_BUF_CNT; ++i) {
-        if ((gpu->flags & GPU_MEM_OFS) == false) {
-            gpu->buf[i].used = 0;
-            gpu->buf[i].size >>= 1;
-        } else {
-            gpu->buf[i].used = gpu->buf[i].size;
-            gpu->buf[i].size <<= 1;
-        }
-    }
-    gpu->flags ^= GPU_MEM_OFS;
-    
-    gpu_db_flush();
+    gpu_draw();
     
     return 0;
-}
-
-def_gpu_db_add(gpu_db_add)
-{
-    if (gpu->draw.used == cl_array_size(gpu->draw.obj))
-        return -1;
-    
-    return 0;
-}
-
-def_gpu_db_flush(gpu_db_flush)
-{
-    char msg[127];
-    VkCommandBuffer cmd[GPU_CMD_CNT];
-    if (gpu->flags & GPU_MEM_UNI) {
-        u32 cmdi = gpu_alloc_cmds(GPU_QI_G, 1);
-        if (cmdi == Max_u32) {
-            log_error("Failed to allocate graphics command buffer for flushing draw buffer");
-            return -1;
-        }
-        cmd[GPU_CI_G] = gpu_cmd(GPU_CI_G).bufs[cmdi];
-        vk_begin_cmd(cmd[GPU_CI_G], GPU_CMD_OT);
-    } else {
-        for(u32 i=0; i < GPU_CMD_CNT; ++i) {
-            u32 cmdi = gpu_alloc_cmds(i, 1);
-            if (cmdi == Max_u32) {
-                log_error("Failed to allocate command buffer %u (%s) for flushing draw buffer", gpu_cmd_name(i));
-                return -1;
-            }
-            cmd[i] = gpu_cmd(GPU_CI_G).bufs[cmdi];
-        }
-        for(u32 i=0; i < GPU_CMD_CNT; ++i)
-            vk_begin_cmd(cmd[i], GPU_CMD_OT);
-    }
-    
-    u64 ofs;
-    u64 sz = sizeof(*gpu->draw.obj) * gpu->draw.used;
-    if (gpu->flags & GPU_MEM_UNI) {
-        ofs = gpu_buf_alloc(GPU_BI_G, sz);
-        if (ofs == Max_u64) {
-            dbg_strcpy(CLSTR(msg), STR("unified memory architecture"));
-            goto bufcpy_fail;
-        }
-        memcpy((u8*)gpu->buf[GPU_BI_G].data + ofs, gpu->draw.obj, sz);
-    } else if (gpu->q[GPU_QI_T].i == gpu->q[GPU_QI_G].i) {
-        dbg_strcpy(CLSTR(msg), STR("non-objscrete transfer"));
-        
-        ofs = gpu_buf_alloc(GPU_BI_T, sz);
-        if (ofs == Max_u64) {
-            goto bufcpy_fail;
-        }
-        
-        ofs = gpu_bufcpy(cmd[GPU_CI_G], ofs, sz, GPU_BI_T, GPU_BI_G);
-        if (ofs == Max_u64)
-            goto bufcpy_fail;
-        
-        memcpy((u8*)gpu->buf[GPU_BI_T].data + ofs, gpu->draw.obj, sz);
-        
-        VkMemoryBarrier2 barr = {VK_STRUCTURE_TYPE_MEMORY_BARRIER_2};
-        barr.srcStageMask = VK_PIPELINE_STAGE_2_TRANSFER_BIT;
-        barr.srcAccessMask = VK_ACCESS_2_MEMORY_WRITE_BIT;
-        barr.dstStageMask = VK_PIPELINE_STAGE_2_VERTEX_ATTRIBUTE_INPUT_BIT;
-        barr.dstAccessMask = VK_ACCESS_2_MEMORY_READ_BIT;
-        
-        VkDependencyInfo dep = {VK_STRUCTURE_TYPE_DEPENDENCY_INFO};
-        dep.memoryBarrierCount = 1;
-        dep.pMemoryBarriers = &barr;
-        
-        vk_cmd_pl_barr(cmd[GPU_CI_G], &dep);
-    } else {
-        dbg_strcpy(CLSTR(msg), STR("objscrete transfer"));
-        
-        ofs = gpu_buf_alloc(GPU_BI_T, sz);
-        if (ofs == Max_u64)
-            goto bufcpy_fail;
-        
-        ofs = gpu_bufcpy(cmd[GPU_CI_T], ofs, sz, GPU_BI_T, GPU_BI_G);
-        if (ofs == Max_u64)
-            goto bufcpy_fail;
-        
-        memcpy((u8*)gpu->buf[GPU_BI_T].data + ofs, gpu->draw.obj, sz);
-        
-        VkMemoryBarrier2 barr[GPU_CMD_CNT] = {
-            [GPU_CI_T] = {
-                .sType = VK_STRUCTURE_TYPE_MEMORY_BARRIER_2,
-                .dstStageMask = VK_PIPELINE_STAGE_2_TRANSFER_BIT,
-                .dstAccessMask = VK_ACCESS_2_MEMORY_WRITE_BIT,
-            },
-            [GPU_CI_G] = {
-                .sType = VK_STRUCTURE_TYPE_MEMORY_BARRIER_2,
-                .srcStageMask = VK_PIPELINE_STAGE_2_VERTEX_ATTRIBUTE_INPUT_BIT,
-                .srcAccessMask = VK_ACCESS_2_MEMORY_READ_BIT,
-            }
-        };
-        
-        VkDependencyInfo dep[GPU_CMD_CNT] = {
-            [GPU_CI_T] = {
-                .sType = VK_STRUCTURE_TYPE_DEPENDENCY_INFO,
-                .memoryBarrierCount = 1,
-                .pMemoryBarriers = &barr[GPU_CI_T],
-            },
-            [GPU_CI_G] = {
-                .sType = VK_STRUCTURE_TYPE_DEPENDENCY_INFO,
-                .memoryBarrierCount = 1,
-                .pMemoryBarriers = &barr[GPU_CI_G],
-            }
-        };
-        
-        vk_cmd_pl_barr(cmd[GPU_CI_T], &dep[GPU_CI_T]);
-        vk_cmd_pl_barr(cmd[GPU_CI_G], &dep[GPU_CI_G]);
-        vk_end_cmd(cmd[GPU_CI_T]);
-    }
-    
-    VkRect2D ra;
-    ra.offset.x = 0;
-    ra.offset.y = 0;
-    ra.extent.width = win->dim.w;
-    ra.extent.height = win->dim.h;
-    
-#if 0
-    // NOTE(SollyCB): I would like to do this, but it can leave artifacts if I do not clear the whole screen.
-    // Maybe there is a better way to account for this than clearing the entire screen?
-    memset(&ra.offset, 0x7f, sizeof(ra.offset));
-    memset(&ra.extent, 0x00, sizeof(ra.extent));
-    for(u32 i=0; i < gpu->draw.used; ++i) {
-        if (gpu->draw.obj[i].pd.ofs.x < ra.offset.x)
-            ra.offset.x = gpu->draw.obj[i].pd.ofs.x;
-        if (gpu->draw.obj[i].pd.ofs.y < ra.offset.y)
-            ra.offset.y = gpu->draw.obj[i].pd.ofs.y;
-        if (gpu->draw.obj[i].pd.ext.w + (u32)gpu->draw.obj[i].pd.ofs.x > ra.extent.width)
-            ra.extent.width = gpu->draw.obj[i].pd.ext.w + gpu->draw.obj[i].pd.ofs.x;
-        if (gpu->draw.obj[i].pd.ext.h + (u32)gpu->draw.obj[i].pd.ofs.y > ra.extent.height)
-            ra.extent.height = gpu->draw.obj[i].pd.ext.h + gpu->draw.obj[i].pd.ofs.y;
-    }
-    
-    // Seems to tightly fit render area to cells
-    ra.offset.x = (s32)roundf((f32)ra.offset.x / 65535.0f * (f32)win->objm.w);
-    ra.offset.y = (s32)roundf((f32)ra.offset.y / 65535.0f * (f32)win->objm.h);
-    ra.extent.width = (s32)roundf((f32)ra.extent.width / 65535.0f * (f32)win->objm.w);
-    ra.extent.height = (s32)roundf((f32)ra.extent.height / 65535.0f * (f32)win->objm.h);
-    
-    if (ra.offset.x > 0) ra.offset.x -= 1;
-    if (ra.offset.y > 0) ra.offset.y -= 1;
-    if (ra.extent.width < win->objm.w) ra.extent.width += 2;
-    if (ra.extent.height < win->objm.h) ra.extent.height += 2;
-    
-    if (ra.extent.width > win->objm.w) ra.extent.width = win->objm.w;
-    if (ra.extent.height > win->objm.h) ra.extent.height = win->objm.h;
-    
-#endif
-    
-    VkClearValue cv = {{{1.0f,1.0f,1.0f,1.0f}}};
-    
-    VkRenderPassBeginInfo rbi = {VK_STRUCTURE_TYPE_RENDER_PASS_BEGIN_INFO};
-    rbi.renderPass = gpu->rp;
-    rbi.framebuffer = gpu->fb[frm_i];
-    rbi.renderArea = ra;
-    rbi.clearValueCount = 1;
-    rbi.pClearValues = &cv;
-    
-    VkSubpassBeginInfo sbi = {
-        .sType = VK_STRUCTURE_TYPE_SUBPASS_BEGIN_INFO,
-        .contents = VK_SUBPASS_CONTENTS_INLINE,
-    };
-    
-    VkViewport vp;
-    vp.x = 0.0f;
-    vp.y = 0.0f;
-    vp.width = (f32)win->dim.w;
-    vp.height = (f32)win->dim.h;
-    vp.minDepth = 0.0f;
-    vp.maxDepth = 1.0f;
-    
-    VkCommandBuffer gcmd = cmd[GPU_CI_G];
-    vk_cmd_begin_rp(gcmd, &rbi, &sbi);
-    vk_cmd_bind_pl(gcmd, VK_PIPELINE_BIND_POINT_GRAPHICS, gpu->pl);
-    vk_cmd_set_viewport(gcmd, 0, 1, &vp);
-    vk_cmd_set_scissor(gcmd, 0, 1, &ra);
-    vk_cmd_bind_ds(gcmd, VK_PIPELINE_BIND_POINT_GRAPHICS, gpu->pll, 0, 1, &gpu->ds);
-    vk_cmd_bind_vb(gcmd, 0, 1, &gpu->buf[GPU_BI_G].handle, &ofs);
-    vk_cmd_draw(gcmd, 6, gpu->draw.used);
-    vk_cmd_end_rp(gcmd);
-    vk_end_cmd(gcmd);
-    
-    if ((gpu->flags & GPU_MEM_UNI) == false && gpu->q[GPU_QI_T].i != gpu->q[GPU_QI_G].i) {
-        enum {WTR,WSC};
-        VkSemaphore w_sem[] = {
-            [WTR] = gpu->draw.sem[DB_SI_T],
-            [WSC] = gpu->sc.map[gpu->sc.i].sem,
-        };
-        VkPipelineStageFlags w_stg[] = {
-            [WTR] = VK_PIPELINE_STAGE_VERTEX_INPUT_BIT,
-            [WSC] = VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT,
-        };
-        VkSubmitInfo gsi = {VK_STRUCTURE_TYPE_SUBMIT_INFO};
-        gsi.waitSemaphoreCount = cl_array_size(w_sem);
-        gsi.pWaitSemaphores = w_sem;
-        gsi.pWaitDstStageMask = w_stg;
-        gsi.commandBufferCount = 1;
-        gsi.pCommandBuffers = &cmd[GPU_CI_G];
-        gsi.signalSemaphoreCount = 1;
-        gsi.pSignalSemaphores = &gpu->draw.sem[GPU_CI_G];
-        
-        VkSubmitInfo tsi = {VK_STRUCTURE_TYPE_SUBMIT_INFO};
-        tsi.commandBufferCount = 1;
-        tsi.pCommandBuffers = &cmd[GPU_CI_T];
-        tsi.signalSemaphoreCount = 1;
-        tsi.pSignalSemaphores = &gpu->draw.sem[GPU_CI_T];
-        
-        if (vk_qsub(gpu->q[GPU_QI_T].handle, 1, &tsi, VK_NULL_HANDLE)) {
-            log_error("Failed to submit transfer commands");
-            return -1;
-        }
-        if (vk_qsub(gpu->q[GPU_QI_G].handle, 1, &gsi, gpu->draw.fence[frm_i])) {
-            log_error("Failed to submit graphics commands");
-            return -1;
-        }
-    } else {
-        enum {WSC};
-        VkSemaphore w_sem[] = {
-            [WSC] = gpu->sc.map[gpu->sc.i].sem,
-        };
-        VkPipelineStageFlags w_stg[] = {
-            [WSC] = VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT,
-        };
-        
-        VkSubmitInfo gsi = {VK_STRUCTURE_TYPE_SUBMIT_INFO};
-        gsi.waitSemaphoreCount = cl_array_size(w_sem);
-        gsi.pWaitSemaphores = w_sem;
-        gsi.pWaitDstStageMask = w_stg;
-        gsi.commandBufferCount = 1;
-        gsi.pCommandBuffers = &cmd[GPU_CI_G];
-        gsi.signalSemaphoreCount = 1;
-        gsi.pSignalSemaphores = &gpu->draw.sem[DB_SI_G];
-        
-        if (vk_qsub(gpu->q[GPU_QI_G].handle, 1, &gsi, gpu->draw.fence[frm_i])) {
-            log_error("Failed to submit graphics commands");
-            return -1;
-        }
-    }
-    
-    gpu->draw.used = 0;
-    
-    VkResult r;
-    VkPresentInfoKHR pi = {VK_STRUCTURE_TYPE_PRESENT_INFO_KHR};
-    pi.waitSemaphoreCount = 1;
-    pi.pWaitSemaphores = &gpu->draw.sem[DB_SI_G];
-    pi.swapchainCount = 1;
-    pi.pSwapchains = &gpu->sc.handle;
-    pi.pImageIndices = &gpu->sc.map[gpu->sc.i].i;
-    pi.pResults = &r;
-    
-    if (vk_qpres(&pi)) {
-        println("QueuePresent was not VK_SUCCESS, requesting window resize");
-        win->flags |= WIN_RSZ;
-        return -1;
-    }
-    
-    return 0;
-    
-    bufcpy_fail:
-    log_error("Failed to allocate gpu memory for flushing draw buffer (%s)", msg);
-    return -1;
 }
 
 def_gpu_check_leaks(gpu_check_leaks)
@@ -1324,21 +1282,38 @@ def_gpu_check_leaks(gpu_check_leaks)
             vk_destroy_buf(gpu->buf[i].handle);
     }
     for(u32 i=0; i < GPU_MEM_CNT; ++i)
-        vk_free_mem(gpu->mem[i].handle);
+        vk_free_mem(gpu->mem[i]);
     
     vk_destroy_shmod(gpu->sh.vert);
     vk_destroy_shmod(gpu->sh.frag);
     vk_destroy_pll(gpu->pll);
     vk_destroy_pl(gpu->pl);
     vk_destroy_rp(gpu->rp);
+    
     for(u32 i=0; i < cl_array_size(gpu->fb); ++i) {
         if (gpu->fb[i])
             vk_destroy_fb(gpu->fb[i]);
     }
     
+    for(u32 i=0; i < cl_array_size(gpu->sc.map); ++i) {
+        if (gpu->sc.map[i].sem) vk_destroy_sem(gpu->sc.map[i].sem);
+    }
+    for(u32 i=0; i < gpu->sc.img_cnt; ++i) {
+        if (gpu->sc.att[i].view) vk_destroy_imgv(gpu->sc.att[i].view);
+    }
+    vk_destroy_sc_khr(gpu->sc.handle);
+    
     vk_destroy_dsl(gpu->dsl);
     vk_destroy_dp(gpu->dp);
-    vk_destroy_sampler(gpu->sampler);
+    
+    for(u32 i=0; i < cl_array_size(gpu->draw.fence); ++i)
+        vk_destroy_fence(gpu->draw.fence[i]);
+    for(u32 i=0; i < cl_array_size(gpu->draw.sem); ++i) {
+        for(u32 j=0; j < cl_array_size(gpu->draw.sem[i]); ++j)
+            vk_destroy_sem(gpu->draw.sem[i][j]);
+    }
     
     vkDestroyDevice(gpu->dev, NULL);
+    
+    while(1) {}
 }

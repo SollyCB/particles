@@ -9,10 +9,6 @@
 
 #define SH_BEGIN
 
-#define SH_SI_CNT (126 - 33 + 1) /* 126 == tilde, 33 == exclamation mark */
-#define SH_SI_SET 0 /* sampler descriptor set index */
-#define SH_SI_BND 0 /* sampler descriptor set binding */
-
 #define SH_COL_LOC 0
 #define SH_POS_LOC 1
 
@@ -22,9 +18,7 @@
 #extension GL_EXT_nonuniform_qualifier : require
 
 struct vf_info_t {
-    vec4 fg;
-    vec4 bg;
-    vec2 tc;
+    vec4 col;
 };
 
 void pv4(vec4 v)
@@ -39,35 +33,26 @@ void pv4(vec4 v)
 // I would like to parse the spirv to get these automatically
 // but I don't think that the VkFormats would be correct
 // because I want to pass in normalized r8/r16, not float...
-layout(location = SH_POS_LOC) in vec3 pos;
+layout(location = SH_POS_LOC) in vec2 pos;
 layout(location = SH_COL_LOC) in vec4 col;
 
 layout(location = 0) out vf_info_t vf_info;
 
 void main() {
-    gl_Position.xyz = pos;
-    
-    vf_info.fg = fg;
-    vf_info.bg = bg;
-    vf_info.tc = offset[index[gl_VertexIndex]] * 0.5;
+    gl_PointSize = 1;
+    gl_Position.xy = (pos - 0.5) * 2;
+    gl_Position.zw = vec2(0,1);
+    vf_info.col = col;
 }
 #else
 /****************************************************/
 // Fragment shader
 
-layout(set = SH_SI_SET, binding = SH_SI_BND) uniform sampler2D glyph[SH_SI_CNT];
-
 layout(location = 0) in vf_info_t vf_info;
-
 layout(location = 0) out vec4 fc;
 
 void main() {
-    uint c = uint(vf_info.bg.a);
-    vec3 bg = vf_info.bg.xyz / 255;
-    
-    float g = texture(glyph[nonuniformEXT(c)], vf_info.tc).r * vf_info.fg.a;
-    vec3 col = mix(bg, vf_info.fg.rgb, g);
-    fc = vec4(col, 1);
+    fc = vf_info.col;
 }
 #endif // shader switch
 
