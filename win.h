@@ -24,9 +24,19 @@ enum win_flags {
     WIN_SZ = WIN_MIN|WIN_MAX|WIN_RSZ,
 };
 
-struct keyboard_input {
-    u16 key; // enum key_codes
-    u16 mod; // enum mod_flags
+enum {
+    WIN_INPUT_KEY,
+    WIN_INPUT_MOUSE,
+};
+
+struct window_input {
+    u32 type;
+    union {
+        struct {
+            u16 key; // enum key_codes
+            u16 mod; // enum mod_flags
+        };
+    };
 };
 
 #define KEY_BUFFER_SIZE 64
@@ -39,8 +49,14 @@ struct win {
     
     struct {
         u16 write,read; // buffer cursors
-        struct keyboard_input buf[KEY_BUFFER_SIZE];
-    } kb; // keyboard input ring buffer
+        struct window_input buf[KEY_BUFFER_SIZE];
+    } input; // keyboard input ring buffer
+    
+    struct {
+        struct offset_u32 pos;
+        struct offset_s32 mov;
+        u8 buttons[4];
+    } mouse;
     
     u32 flags; // enum win_flags
 };
@@ -71,10 +87,10 @@ def_win_create_surf(win_create_surf);
 #define def_win_poll(name) int win_poll(void)
 def_win_poll(win_poll);
 
-#define def_win_kb_next(name) bool name(struct keyboard_input *ki)
+#define def_win_kb_next(name) bool name(struct window_input *ki)
 def_win_kb_next(win_kb_next);
 
-#define def_win_key_to_char(name) char name(struct keyboard_input ki)
+#define def_win_key_to_char(name) char name(struct window_input ki)
 def_win_key_to_char(win_key_to_char);
 
 #endif // LIB

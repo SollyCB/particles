@@ -14,6 +14,7 @@ def_prg_load(prg_load)
     gpu = &prg->gpu;
     win = &prg->win;
     vdt = &prg->vdt;
+    world = &prg->world;
     
     prg->fn.create = create_prg;
     prg->fn.should_shutdown = should_prg_shutdown;
@@ -54,6 +55,7 @@ def_create_prg(create_prg)
     
     create_win();
     create_gpu();
+    create_world();
 }
 
 def_should_prg_shutdown(should_prg_shutdown)
@@ -122,7 +124,7 @@ def_prg_update(prg_update)
     bool got_input = false;
     
     // input
-    struct keyboard_input ki;
+    struct window_input ki;
     while(win_kb_next(&ki)) { // @Todo
         got_input = true;
         char c = win_key_to_char(ki);
@@ -140,6 +142,7 @@ def_prg_update(prg_update)
     }
     
     /* update */
+    world_update();
     gpu_update();
     
     /* end frame */

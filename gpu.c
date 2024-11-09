@@ -1232,8 +1232,6 @@ def_gpu_draw(gpu_draw)
 
 def_gpu_update(gpu_update)
 {
-    gpu_add_draw_elem(RGBA(255, 0, 0, 255), OFFSET_U16(32000,32000));
-    
     if (gpu->draw.used == 0)
         return 0;
     
@@ -1315,5 +1313,5 @@ def_gpu_check_leaks(gpu_check_leaks)
     
     vkDestroyDevice(gpu->dev, NULL);
     
-    while(1) {}
+    //while(1) {}
 }

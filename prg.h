@@ -6,6 +6,7 @@
 #include "gpu.h"
 #include "win.h"
 #include "vdt.h"
+#include "world.h"
 
 #define FONT_URI "fonts/liberation-mono.ttf"
 #define FONT_HEIGHT 15
@@ -76,6 +77,8 @@ struct program {
     struct gpu gpu;
     struct win win;
     struct vdt vdt;
+    
+    struct world world;
     
     u32 flags;
     u32 thread_count;

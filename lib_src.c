@@ -9,3 +9,4 @@
 #include "win.c"
 #include "gpu.c"
 #include "vdt.c"
+#include "world.c"

@@ -3,25 +3,25 @@
 
 struct win *win;
 
-typedef typeof(win->kb.read) keycode_t;
+typedef typeof(win->input.read) keycode_t;
 
 keycode_t win_scancode_to_key(SDL_Scancode sc)
 {
     return (keycode_t) sc;
 }
 
-internal inline keycode_t win_kb_inc(keycode_t pos)
+internal inline keycode_t win_input_inc(keycode_t pos)
 {
-    return (keycode_t) inc_and_wrap(pos, cl_array_size(win->kb.buf));
+    return (keycode_t) inc_and_wrap(pos, cl_array_size(win->input.buf));
 }
 
-internal int win_kb_add(struct keyboard_input ki)
+internal int win_kb_add(struct window_input ki)
 {
-    keycode_t w = win_kb_inc(win->kb.write);
-    if (w == win->kb.read) return -1;
+    keycode_t w = win_input_inc(win->input.write);
+    if (w == win->input.read) return -1;
     
-    win->kb.buf[w] = ki;
-    win->kb.write = w;
+    win->input.buf[w] = ki;
+    win->input.write = w;
     return 0;
 }
 
@@ -72,6 +72,8 @@ def_win_create_surf(win_create_surf)
 def_win_poll(win_poll)
 {
     win->flags &= ~WIN_SZ;
+    memset(&win->mouse.mov, 0, sizeof(win->mouse.mov));
+    memset(&win->mouse.buttons, 0, sizeof(win->mouse.buttons));
     
     SDL_Event e;
     while(SDL_PollEvent(&e) || (win->flags & WIN_MIN)) {
@@ -83,7 +85,7 @@ def_win_poll(win_poll)
             
             case SDL_KEYDOWN:
             case SDL_KEYUP: {
-                struct keyboard_input ki;
+                struct window_input ki;
                 ki.key = win_scancode_to_key(e.key.keysym.scancode);
                 ki.mod = e.type == SDL_KEYDOWN ? PRESS : RELEASE;
                 
@@ -96,6 +98,24 @@ def_win_poll(win_poll)
                     log_error("Window key buffer is overflowing!");
                     return -1;
                 }
+            } break;
+            
+            case SDL_MOUSEMOTION: {
+                win->mouse.pos.x = e.motion.x;
+                win->mouse.pos.y = e.motion.y;
+                win->mouse.mov.x = e.motion.xrel;
+                win->mouse.mov.y = e.motion.yrel;
+            } break;
+            
+            case SDL_MOUSEBUTTONDOWN: {
+                if (e.button.button >= cl_array_size(win->mouse.buttons))
+                    break;
+                win->mouse.buttons[e.button.button] = PRESS;
+            } break;
+            case SDL_MOUSEBUTTONUP: {
+                if (e.button.button >= cl_array_size(win->mouse.buttons))
+                    break;
+                win->mouse.buttons[e.button.button] = RELEASE;
             } break;
             
             case SDL_WINDOWEVENT: {
@@ -141,7 +161,6 @@ def_win_poll(win_poll)
             break;
         }
     }
-    
     if (win->flags & WIN_RSZ) {
         SDL_GetWindowSize(win->handle, (int*)&win->dim.w, (int*)&win->dim.h);
         win->rdim.w = 1.0f / win->dim.w;
@@ -153,9 +172,9 @@ def_win_poll(win_poll)
 
 def_win_kb_next(win_kb_next)
 {
-    if (win->kb.read == win->kb.write) return false;
-    win->kb.read = win_kb_inc(win->kb.read);
-    *ki = win->kb.buf[win->kb.read];
+    if (win->input.read == win->input.write) return false;
+    win->input.read = win_input_inc(win->input.read);
+    *ki = win->input.buf[win->input.read];
     return true;
 }
 
