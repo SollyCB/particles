@@ -1227,6 +1227,8 @@ def_gpu_draw(gpu_draw)
         return -1;
     }
     
+    gpu->draw.used = 0;
+    
     return 0;
 }
 

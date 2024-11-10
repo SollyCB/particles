@@ -4,21 +4,50 @@
 #include "../solh/sol.h"
 
 enum world_elem_modifiers {
+    // types
     WEM_TYPE_VOID,
     WEM_TYPE_ROCK,
     WEM_TYPE_CNT,
+    
+    // states
     WEM_STATE_UPDATE = 0x0100,
     WEM_STATE_WET = 0x0200,
+    
+    WEM_PRESERVE_TYPE = 0x00ff,
 };
 
-struct world_elem {
+struct msvc_align(16) world_elem {
     struct offset_u16 pos; // relative to chunk
     struct rgba col;
+    
+    // Be very careful accessing directly. It is very easy to accidentally modify
+    // type when trying to set the state, and vice versa. Prefer the below accessors.
+    // This is a very good example of where 'private' would be useful LOL!
     union {
-        u8 type;
-        u32 state;
+        u16 type; // low 16 bits
+        u64 state; // top 48 bits
     };
-};
+} gcc_align(16);
+
+static inline void wem_set_type(struct world_elem *e, u8 type)
+{
+    e->type = type;
+}
+
+static inline void wem_add_state(struct world_elem *e, u32 state)
+{
+    e->state |= state|WEM_PRESERVE_TYPE;
+}
+
+static inline void wem_rm_state(struct world_elem *e, u32 state)
+{
+    e->state &= (~state)|WEM_PRESERVE_TYPE;
+}
+
+static inline void wem_clear_state(struct world_elem *e)
+{
+    e->state &= WEM_PRESERVE_TYPE;
+}
 
 #define WAR_CHUNK_DIM_W 128
 #define WAR_CHUNK_DIM_H 128
@@ -53,6 +82,7 @@ struct world {
     
     struct {
         struct world_elem elem;
+        u32 brush_width;
     } editor;
 };
 

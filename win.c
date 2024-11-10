@@ -73,7 +73,6 @@ def_win_poll(win_poll)
 {
     win->flags &= ~WIN_SZ;
     memset(&win->mouse.mov, 0, sizeof(win->mouse.mov));
-    memset(&win->mouse.buttons, 0, sizeof(win->mouse.buttons));
     
     SDL_Event e;
     while(SDL_PollEvent(&e) || (win->flags & WIN_MIN)) {

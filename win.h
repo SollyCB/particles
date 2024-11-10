@@ -56,8 +56,7 @@ struct win {
         struct offset_u32 pos;
         struct offset_s32 mov;
         struct {
-            u8 b1;
-            u8 b2;
+            u8 b1,b2;
         } buttons;
     } mouse;
     
@@ -76,6 +75,11 @@ static inline bool win_should_close(void)
 static inline u32 win_ms(void)
 {
     return SDL_GetTicks();
+}
+
+static inline struct offset_u16 win_normalize_screen_px(struct offset_u16 p)
+{
+    return OFFSET(u16, (f32)p.x * win->rdim.w * 65535, (f32)p.y * win->rdim.h * 65535);
 }
 
 #define def_create_win(name) void name(void)
