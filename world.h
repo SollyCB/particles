@@ -20,8 +20,8 @@ struct world_elem {
     };
 };
 
-#define WAR_CHUNK_DIM_H 128
 #define WAR_CHUNK_DIM_W 128
+#define WAR_CHUNK_DIM_H 128
 
 struct world_chunk {
     struct world_elem elem[WAR_CHUNK_DIM_H][WAR_CHUNK_DIM_W];
@@ -50,6 +50,10 @@ struct world {
         struct rgba col;
         struct offset_u32 pos;
     } player;
+    
+    struct {
+        struct world_elem elem;
+    } editor;
 };
 
 #ifdef LIB

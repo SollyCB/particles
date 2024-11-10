@@ -121,33 +121,12 @@ def_prg_update(prg_update)
         }
     }
     
-    bool got_input = false;
-    
-    // input
-    struct window_input ki;
-    while(win_kb_next(&ki)) { // @Todo
-        got_input = true;
-        char c = win_key_to_char(ki);
-        if (ki.mod & RELEASE) {
-            continue;
-        } else if (ki.key == KEY_ESCAPE) {
-            win->flags |= WIN_CLO;
-            gpu_check_leaks();
-            return 0;
-        } else if (c > 0) {
-            println("Got input %c", c);
-        } else {
-            println("Input is not a text char");
-        }
-    }
-    
     /* update */
     world_update();
     gpu_update();
     
     /* end frame */
-    if (!got_input)
-        os_sleep_ms(0); // relinquish time slice
+    os_sleep_ms(0); // relinquish time slice
     
     return 0;
 }
