@@ -87,7 +87,11 @@ def_prg_update(prg_update)
         prg->frames.worst = prg->time.dms;
     
     prg->frames.avg = prg->time.ms / prg->frames.cnt;
-    // println("frame avg dt %u", prg->frames.avg);
+    {
+        timed_trigger(frame_time_trigger, false, secs_to_ms(2));
+        if (frame_time_trigger)
+            println("average frame time: %ums", prg->frames.avg);
+    }
     
     /* hotloader */
     internal u32 rld_timer = 0;
@@ -126,7 +130,7 @@ def_prg_update(prg_update)
     gpu_update();
     
     /* end frame */
-    os_sleep_ms(0); // relinquish time slice
+    //os_sleep_ms(0); // relinquish time slice
     
     return 0;
 }

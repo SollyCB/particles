@@ -100,6 +100,17 @@ def_win_kb_next(win_kb_next);
 #define def_win_key_to_char(name) char name(struct window_input ki)
 def_win_key_to_char(win_key_to_char);
 
+#define timed_trigger(name, initial_value, step) \
+local_persist u32 m__ ## name ## _timer = step; \
+bool name = initial_value; \
+if (m__ ## name ## _timer < win_ms()) { \
+name = true; \
+m__ ## name ## _timer= win_ms() + step; \
+}
+
+#define create_timer(name) u32 name = win_ms();
+#define check_timer(name, msg) println("%s%ums", msg, (u64)win_ms() - name);
+
 #endif // LIB
 
 #endif // include guard

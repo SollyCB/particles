@@ -26,12 +26,22 @@ static inline struct offset_u32 world_mouse_to_elem(void)
     return r;
 }
 
-static inline struct offset_u32* world_mouse_mov_to_elems(void)
+static inline struct offset_u32* world_mouse_to_elems(u32 *cnt)
+{
+    u32 h = ((s32)win->mouse.pos.x - (win->dim.w / 2)) + world->player.pos.x;
+    u32 k = ((s32)win->mouse.pos.y - (win->dim.h / 2)) + world->player.pos.y;
+    s32 r = world->editor.brush_width;
+    struct offset_u32 *ret = salloc(MT, sizeof(*ret) * r * r);
+    *cnt = fill_circle(r, h, k, ret);
+    return ret;
+}
+
+static inline struct offset_u32* world_mouse_mov_to_elems(u32 *cnt)
 {
     u32 x_end = win->mouse.pos.x;
     u32 y_end = win->mouse.pos.y;
-    u32 x_beg = win->mouse_pos.x - win->mouse.mov.x;
-    u32 y_beg = win->mouse_pos.y - win->mouse.mov.y;
+    u32 x_beg = win->mouse.pos.x - win->mouse.mov.x;
+    u32 y_beg = win->mouse.pos.y - win->mouse.mov.y;
     
     struct offset_u32 beg,end;
     beg.x = ((s32)x_beg - (win->dim.w / 2)) + world->player.pos.x;
@@ -39,27 +49,24 @@ static inline struct offset_u32* world_mouse_mov_to_elems(void)
     end.x = ((s32)x_end - (win->dim.w / 2)) + world->player.pos.x;
     end.y = ((s32)y_end - (win->dim.h / 2)) + world->player.pos.y;
     
-    f32 m = ((f32)x_end - x_beg) / ((f32)y_end - y_beg);
-    u32 r = world->editor.brush_width;
+    s32 r = world->editor.brush_width;
+    struct offset_u32 *ret = salloc(MT, sizeof(*ret) * r * r);
+    *cnt = 0;
     
-    u32 scr_x = world->player.pos.x - win->dim.w / 2;
-    u32 scr_w = world->player.pos.x - win->dim.w / 2;
-    u32 scr_y = world->player.pos.y + win->dim.h / 2;
-    u32 scr_h = world->player.pos.y + win->dim.h / 2;
+    f32 m = (f32)(x_end - x_beg) / (f32)(y_end - y_beg);
+    f32 inc_k = (f32)(m * r);
+    f32 inc_h = (f32)((1 - m) * r);
     
-    for(u32 h = x_beg, k = y_beg;
-        h < x_end && k < y_end;
-        k += (s32)(m * r), h += (s32)((1 - m) * r))
+    f32 len = powf((f32)x_end - x_beg, 2) + powf((f32)y_end - y_beg, 2);
+    
+    for(f32 h = 0, k = 0;
+        h*h + k*k < len;
+        k += inc_k, h += inc_h)
     {
-        if (h - r < scr_x || h + r >= scr_w || k - r < scr_y || k + r >= scr_h)
-            continue;
-        
-        for(u32 x = 0; x < per; ++x) {
-            u32 y = (u32)circle(x, r, h, k);
-        }
+        *cnt += fill_circle(r, (s32)h, (s32)k, ret + *cnt);
     }
     
-    return gay;
+    return ret;
 }
 
 static inline u32 world_chunk_i(struct offset_u32 p)
@@ -137,8 +144,12 @@ internal void world_save(void)
 
 internal void world_edit_elem(void)
 {
-    println("editing world element at pixel %u %u", (u64)win->mouse.pos.x, (u64)win->mouse.pos.y);
+    u32 scr_x = world->player.pos.x - win->dim.w / 2;
+    u32 scr_y = world->player.pos.y - win->dim.h / 2;
+    u32 scr_w = world->player.pos.x + win->dim.w / 2;
+    u32 scr_h = world->player.pos.y + win->dim.h / 2;
     
+#if 0
     struct offset_u32 e_pos = world_mouse_to_elem();
     struct offset_u32 c_pos = world_elem_to_chunk(e_pos);
     
@@ -146,6 +157,30 @@ internal void world_edit_elem(void)
     struct world_elem *e = world_elem_from_chunk(c, e_pos);
     
     *e = world->editor.elem;
+#endif
+    
+    u32 cnt;
+    struct offset_u32 *arr;
+    if (win->mouse.mov.x || win->mouse.mov.y)
+        arr = world_mouse_mov_to_elems(&cnt);
+    else
+        arr = world_mouse_to_elems(&cnt);
+    
+    for(u32 i = 0; i < cnt; ++i) {
+        struct offset_u32 e_pos = arr[i];
+        
+        if (e_pos.x < scr_x || e_pos.x >= scr_w ||
+            e_pos.y < scr_y || e_pos.y >= scr_h)
+        {
+            continue;
+        }
+        
+        struct offset_u32 c_pos = world_elem_to_chunk(e_pos);
+        struct world_chunk *c = world_chunk_from_war(c_pos);
+        struct world_elem *e = world_elem_from_chunk(c, e_pos);
+        
+        *e = world->editor.elem;
+    }
 }
 
 internal void world_handle_input(void)
@@ -158,7 +193,6 @@ internal void world_handle_input(void)
         switch(ki.key) {
             case KEY_ESCAPE: {
                 win->flags |= WIN_CLO;
-                gpu_check_leaks();
             } break;
             
             case KEY_S: {
@@ -197,7 +231,7 @@ def_create_world(create_world)
     world->player.pos = OFFSET(u32, world->war.dim.w * WAR_CHUNK_DIM_W / 2, world->war.dim.h * WAR_CHUNK_DIM_H / 2);
     
     world->editor.elem.col = RGBA(255,255,255,255);
-    world->editor.elem.brush_width = 10;
+    world->editor.brush_width = 10;
     wem_set_type(&world->editor.elem, WEM_TYPE_ROCK);
     wem_clear_state(&world->editor.elem);
     
