@@ -197,6 +197,8 @@ internal void world_handle_input(void)
     if (win->mouse.buttons.b1 == PRESS)
         world_edit_elem();
     
+    u8 col_step = 10;
+    
     struct window_input ki;
     while(win_kb_next(&ki)) { // @Todo
         switch(ki.key) {
@@ -206,6 +208,37 @@ internal void world_handle_input(void)
             
             case KEY_S: {
                 if (ki.mod & CTRL) world_save();
+            } break;
+            
+            case KEY_R: {
+                if (ki.mod & SHIFT)
+                    world->editor.elem.col.r -= (world->editor.elem.col.r > col_step) * col_step;
+                else
+                    world->editor.elem.col.r += (world->editor.elem.col.r < Max_u8 - col_step) * col_step;
+                println("RED : %u / 255", (u64)world->editor.elem.col.r);
+            } break;
+            
+            case KEY_G: {
+                if (ki.mod & SHIFT)
+                    world->editor.elem.col.g -= (world->editor.elem.col.g > col_step) * col_step;
+                else
+                    world->editor.elem.col.g += (world->editor.elem.col.g < Max_u8 - col_step) * col_step;
+                println("GREEN : %u / 255", (u64)world->editor.elem.col.g);
+            } break;
+            
+            case KEY_B: {
+                if (ki.mod & SHIFT)
+                    world->editor.elem.col.b -= (world->editor.elem.col.b > col_step) * col_step;
+                else
+                    world->editor.elem.col.b += (world->editor.elem.col.b < Max_u8 - col_step) * col_step;
+                println("BLUE : %u / 255", (u64)world->editor.elem.col.b);
+            } break;
+            
+            case KEY_MINUS: {
+                if (ki.mod & SHIFT)
+                    world->editor.brush_width -= (world->editor.brush_width > 1);
+                else
+                    world->editor.brush_width += (world->editor.brush_width < 250);
             } break;
             
             default: break;
