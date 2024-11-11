@@ -8,22 +8,7 @@
 #include "vdt.h"
 #include "world.h"
 
-#define FONT_URI "fonts/liberation-mono.ttf"
-#define FONT_HEIGHT 15
-
-#define FG_RED 0
-#define FG_GRN 0
-#define FG_BLU 0
-#define BG_RED 255
-#define BG_GRN 255
-#define BG_BLU 255
-
-// alpha channel of bg holds char index
-#define FG_COL ((struct rgba) {.r = FG_RED, .g = FG_GRN, .b = FG_BLU, .a = 255})
-#define BG_COL ((struct rgba) {.r = BG_RED, .g = BG_GRN, .b = BG_BLU, .a = 0})
-
-#define CSR_FG ((struct rgba) {.r = BG_RED, .g = BG_GRN, .b = BG_BLU, .a = 255})
-#define CSR_BG ((struct rgba) {.r = FG_RED, .g = FG_GRN, .b = FG_BLU, .a = 0})
+#define REPORT_FRAME_TIME 0
 
 #define INIT_WIN_W 640
 #define INIT_WIN_H 480

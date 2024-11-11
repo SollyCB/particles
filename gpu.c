@@ -1234,6 +1234,9 @@ def_gpu_draw(gpu_draw)
 
 def_gpu_update(gpu_update)
 {
+    timed_trigger(frame_timer_trigger, false, secs_to_ms(2));
+    create_timer(frame_timer);
+    
     if (win_should_close()) {
         gpu_check_leaks();
         return 0;
@@ -1242,17 +1245,11 @@ def_gpu_update(gpu_update)
     if (gpu->draw.used == 0)
         return 0;
     
-    timed_trigger(image_trigger, false, secs_to_ms(2));
-    create_timer(image_timer);
-    
     gpu_inc_frame();
     gpu_await_draw_fence();
     if (cvk(gpu_sc_next_img()))
         log_error("Failed to acquire proper image from swapchain");
     gpu_reset_draw_fence();
-    
-    if (image_trigger)
-        check_timer(image_timer, "time to get image: ");
     
     if (gpu_next_fb()) {
         log_error("Failed to create framebuffer");
@@ -1266,6 +1263,9 @@ def_gpu_update(gpu_update)
     }
     
     gpu_draw();
+    
+    if (frame_timer_trigger && REPORT_FRAME_TIME)
+        check_timer(frame_timer, "Time to get image: ");
     
     return 0;
 }

@@ -89,7 +89,7 @@ def_prg_update(prg_update)
     prg->frames.avg = prg->time.ms / prg->frames.cnt;
     {
         timed_trigger(frame_time_trigger, false, secs_to_ms(2));
-        if (frame_time_trigger)
+        if (frame_time_trigger && REPORT_FRAME_TIME)
             println("average frame time: %ums", prg->frames.avg);
     }
     

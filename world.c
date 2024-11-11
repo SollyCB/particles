@@ -38,32 +38,51 @@ static inline struct offset_u32* world_mouse_to_elems(u32 *cnt)
 
 static inline struct offset_u32* world_mouse_mov_to_elems(u32 *cnt)
 {
-    u32 x_end = win->mouse.pos.x;
-    u32 y_end = win->mouse.pos.y;
-    u32 x_beg = win->mouse.pos.x - win->mouse.mov.x;
-    u32 y_beg = win->mouse.pos.y - win->mouse.mov.y;
+    u32 x2 = win->mouse.pos.x;
+    u32 y2 = win->mouse.pos.y;
+    u32 x1 = win->mouse.pos.x - win->mouse.mov.x;
+    u32 y1 = win->mouse.pos.y - win->mouse.mov.y;
     
-    struct offset_u32 beg,end;
-    beg.x = ((s32)x_beg - (win->dim.w / 2)) + world->player.pos.x;
-    beg.y = ((s32)y_beg - (win->dim.h / 2)) + world->player.pos.y;
-    end.x = ((s32)x_end - (win->dim.w / 2)) + world->player.pos.x;
-    end.y = ((s32)y_end - (win->dim.h / 2)) + world->player.pos.y;
+    u32 l = (u32)sqrtf((f32)((x2-x1)*(x2-x1) + (y2-y1)*(y2-y1)));
+    struct offset_u32 *ret = salloc(MT, sizeof(*ret) * world->editor.brush_width * l);
     
-    s32 r = world->editor.brush_width;
-    struct offset_u32 *ret = salloc(MT, sizeof(*ret) * r * r);
+    struct offset_s32 p1,p2;
+    p1.x = ((s32)x1 - (win->dim.w / 2)) + world->player.pos.x;
+    p1.y = ((s32)y1 - (win->dim.h / 2)) + world->player.pos.y;
+    p2.x = ((s32)x2 - (win->dim.w / 2)) + world->player.pos.x;
+    p2.y = ((s32)y2 - (win->dim.h / 2)) + world->player.pos.y;
+    
     *cnt = 0;
+    s32 r = (s32)world->editor.brush_width;
     
-    f32 m = (f32)(x_end - x_beg) / (f32)(y_end - y_beg);
-    f32 inc_k = (f32)(m * r);
-    f32 inc_h = (f32)((1 - m) * r);
+    if (p1.y > p2.y)
+        swap(p1,p2);
     
-    f32 len = powf((f32)x_end - x_beg, 2) + powf((f32)y_end - y_beg, 2);
+    if (p1.x == p2.x) {
+        for(u32 i = p1.y; i < (u32)p2.y; ++i)
+            *cnt += fill_circle(r, p1.x, i, ret + *cnt);
+    } else if (p1.y == p2.y) {
+        if (p1.x > p2.x)
+            swap(p1, p2);
+        for(u32 i = p1.x; i < (u32)p2.x; ++i)
+            *cnt += fill_circle(r, i, p1.y, ret + *cnt);
+    }
     
-    for(f32 h = 0, k = 0;
-        h*h + k*k < len;
-        k += inc_k, h += inc_h)
+    struct offset_s32 vec = OFFSET(s32, p2.x - p1.x, p2.y - p1.y);
+    float f = (f32)(r * r) / (vec.x*vec.x + vec.y*vec.y);
+    f32 sh_x = vec.x * f;
+    f32 sh_y = vec.y * f;
+    
+    u32 bi = p1.x;
+    u32 ei = p2.x;
+    if (bi > ei)
+        swap(bi,ei);
+    
+    for(f32 k = (f32)p1.y, h = (f32)bi;
+        k < (f32)p2.y && (u32)fabsf(h) < ei;
+        k += sh_y, h += sh_x)
     {
-        *cnt += fill_circle(r, (s32)h, (s32)k, ret + *cnt);
+        *cnt += fill_circle(r, (u32)h, (u32)k, ret + *cnt);
     }
     
     return ret;
@@ -149,16 +168,6 @@ internal void world_edit_elem(void)
     u32 scr_w = world->player.pos.x + win->dim.w / 2;
     u32 scr_h = world->player.pos.y + win->dim.h / 2;
     
-#if 0
-    struct offset_u32 e_pos = world_mouse_to_elem();
-    struct offset_u32 c_pos = world_elem_to_chunk(e_pos);
-    
-    struct world_chunk *c = world_chunk_from_war(c_pos);
-    struct world_elem *e = world_elem_from_chunk(c, e_pos);
-    
-    *e = world->editor.elem;
-#endif
-    
     u32 cnt;
     struct offset_u32 *arr;
     if (win->mouse.mov.x || win->mouse.mov.y)
@@ -240,6 +249,9 @@ def_create_world(create_world)
 
 def_world_update(world_update)
 {
+    timed_trigger(frame_time_trigger, false, secs_to_ms(2));
+    create_timer(frame_timer);
+    
     world_update_player_col();
     world_handle_input();
     
@@ -287,6 +299,9 @@ def_world_update(world_update)
             }
         }
     }
+    
+    if (frame_time_trigger && REPORT_FRAME_TIME)
+        check_timer(frame_timer, "Time to update world: ");
     
     return 0;
 }
