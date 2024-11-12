@@ -81,7 +81,7 @@ static inline u32 win_ms(void)
 
 static inline struct offset_u16 win_normalize_screen_px(struct offset_u16 p)
 {
-    return OFFSET(u16, (f32)p.x * win->rdim.w * 65535, (f32)p.y * win->rdim.h * 65535);
+    return OFFSET((f32)p.x * win->rdim.w * 65535, (f32)p.y * win->rdim.h * 65535, u16);
 }
 
 #define def_create_win(name) void name(void)

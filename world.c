@@ -2,31 +2,56 @@
 
 #define WORLD_FILE_URI "world.bin"
 
-static inline struct offset_u32 world_first_visible_elem(void)
-{
-    struct offset_u32 r;
-    r.x = world->player.pos.x - (win->dim.w / 2);
-    r.y = world->player.pos.y - (win->dim.h / 2);
-    return r;
+inline_fn struct offset_u32 world_first_visible_elem(void) {
+    return OFFSET(world->player.pos.x - (win->dim.w / 2),
+                  world->player.pos.y - (win->dim.h / 2), u32);
 }
 
-static inline struct offset_u32 world_first_hidden_elem(void)
-{
-    struct offset_u32 r;
-    r.x = world->player.pos.x + (win->dim.w / 2);
-    r.y = world->player.pos.y + (win->dim.h / 2);
-    return r;
+inline_fn struct offset_u32 world_first_hidden_elem(void) {
+    return OFFSET(world->player.pos.x + (win->dim.w / 2),
+                  world->player.pos.y + (win->dim.h / 2), u32);
 }
 
-inline_fn struct offset_u32 world_screen_pos_to_elem(struct offset_u32 pos)
-{
-    struct offset_u32 r;
-    r.x = ((s32)pos.x - (win->dim.w / 2)) + world->player.pos.x;
-    r.y = ((s32)pos.y - (win->dim.h / 2)) + world->player.pos.y;
-    return r;
+inline_fn struct offset_u32 world_screen_pos_to_elem(struct offset_u32 pos) {
+    return OFFSET(((s32)pos.x - (win->dim.w / 2)) + world->player.pos.x,
+                  ((s32)pos.y - (win->dim.h / 2)) + world->player.pos.y, u32);
 }
 
-static inline struct offset_u32* world_pos_to_elems(struct offset_u32 pos, u32 *cnt)
+inline_fn u32 world_chunk_i(struct offset_u32 p) {
+    u32 x = ((p.x + world->war.ofs.x) % world->war.dim.w);
+    u32 y = ((p.y + world->war.ofs.y) % world->war.dim.h) * world->war.dim.w;
+    return x + y;
+}
+
+inline_fn struct offset_u32 world_chunk_i_to_ofs(u32 i) {
+    return OFFSET(((i % world->war.dim.w) + (world->war.dim.w - world->war.ofs.x)) % world->war.dim.w,
+                  ((i / world->war.dim.w) + (world->war.dim.h - world->war.ofs.y)) % world->war.dim.h, u32);
+}
+
+inline_fn u32 world_elem_chunk_x(u32 x) { return x % WAR_CHUNK_DIM_W; }
+
+inline_fn u32 world_elem_chunk_y(u32 y) { return y % WAR_CHUNK_DIM_H; }
+
+inline_fn struct world_chunk* world_chunk_from_war(struct offset_u32 p) {
+    return &world->war.chunks[world_chunk_i(p)];
+}
+
+inline_fn struct offset_u32 world_elem_to_chunk(struct offset_u32 p) {
+    return OFFSET(p.x / WAR_CHUNK_DIM_W, p.y / WAR_CHUNK_DIM_H, u32);
+}
+
+inline_fn struct world_elem* world_elem_from_chunk(struct world_chunk *c, struct offset_u32 p) {
+    return &c->elem[world_elem_chunk_y(p.y)][world_elem_chunk_x(p.x)];
+}
+
+inline_fn struct offset_u32 world_chunk_to_screen_px(struct offset_u32 c_pos) {
+    struct offset_u32 e_beg = world_first_visible_elem();
+    struct offset_u32 c_beg = world_elem_to_chunk(e_beg);
+    return OFFSET((c_pos.x - c_beg.x) * WAR_CHUNK_DIM_W - (e_beg.x % WAR_CHUNK_DIM_W),
+                  (c_pos.y - c_beg.y) * WAR_CHUNK_DIM_H - (e_beg.y % WAR_CHUNK_DIM_H), u32);
+}
+
+internal struct offset_u32* world_pos_to_elems(struct offset_u32 pos, u32 *cnt)
 {
     u32 h = pos.x;
     u32 k = pos.y;
@@ -36,10 +61,10 @@ static inline struct offset_u32* world_pos_to_elems(struct offset_u32 pos, u32 *
     return ret;
 }
 
-static inline struct offset_u32* world_mov_to_elems(struct offset_u32 pos, struct offset_s32 mov, u32 *cnt)
+internal struct offset_u32* world_mov_to_elems(struct offset_u32 pos, struct offset_s32 mov, u32 *cnt)
 {
-    struct offset_s32 p1 = OFFSET(s32, (s32)pos.x, (s32)pos.y);
-    struct offset_s32 p2 = OFFSET(s32, (s32)pos.x + mov.x, (s32)pos.y + mov.y);
+    struct offset_s32 p1 = OFFSET((s32)pos.x, (s32)pos.y, s32);
+    struct offset_s32 p2 = OFFSET((s32)pos.x + mov.x, (s32)pos.y + mov.y, s32);
     
     u32 l = (u32)sqrtf((f32)((p2.x-p1.x)*(p2.x-p1.x) + (p2.y-p1.y)*(p2.y-p1.y)));
     struct offset_u32 *ret = salloc(MT, sizeof(*ret) * world->editor.brush_width * l);
@@ -60,7 +85,7 @@ static inline struct offset_u32* world_mov_to_elems(struct offset_u32 pos, struc
             *cnt += fill_circle(r, i, p1.y, ret + *cnt);
     }
     
-    struct offset_s32 vec = OFFSET(s32, p2.x - p1.x, p2.y - p1.y);
+    struct offset_s32 vec = OFFSET(p2.x - p1.x, p2.y - p1.y, s32);
     float f = (f32)(r * r) / (vec.x*vec.x + vec.y*vec.y);
     f32 sh_x = vec.x * f;
     f32 sh_y = vec.y * f;
@@ -82,54 +107,6 @@ static inline struct offset_u32* world_mov_to_elems(struct offset_u32 pos, struc
     }
     
     return ret;
-}
-
-static inline u32 world_chunk_i(struct offset_u32 p)
-{
-    p.x = (p.x + world->war.ofs.x) % world->war.dim.w;
-    p.y = (p.y + world->war.ofs.y) % world->war.dim.h;
-    return world->war.dim.w * p.y + p.x;
-}
-
-static inline struct offset_u32 world_chunk_i_to_ofs(u32 i)
-{
-    u32 x = ((i % world->war.dim.w) + (world->war.dim.w - world->war.ofs.x)) % world->war.dim.w;
-    u32 y = ((i / world->war.dim.w) + (world->war.dim.h - world->war.ofs.y)) % world->war.dim.h;
-    return OFFSET(u32,x,y);
-}
-
-static inline u32 world_elem_chunk_x(u32 x)
-{
-    return x % WAR_CHUNK_DIM_W;
-}
-
-static inline u32 world_elem_chunk_y(u32 y)
-{
-    return y % WAR_CHUNK_DIM_H;
-}
-
-static inline struct world_chunk* world_chunk_from_war(struct offset_u32 p)
-{
-    return &world->war.chunks[world_chunk_i(p)];
-}
-
-static inline struct offset_u32 world_elem_to_chunk(struct offset_u32 p)
-{
-    return OFFSET(u32,p.x / WAR_CHUNK_DIM_W,p.y / WAR_CHUNK_DIM_H);
-}
-
-static inline struct world_elem* world_elem_from_chunk(struct world_chunk *c, struct offset_u32 p)
-{
-    return &c->elem[world_elem_chunk_y(p.y)][world_elem_chunk_x(p.x)];
-}
-
-static inline struct offset_u32 world_chunk_to_screen_px(struct offset_u32 c_pos)
-{
-    struct offset_u32 e_beg = world_first_visible_elem();
-    struct offset_u32 c_beg = world_elem_to_chunk(e_beg);
-    struct offset_u32 r = OFFSET(u32,(c_pos.x - c_beg.x) * WAR_CHUNK_DIM_W - (e_beg.x % WAR_CHUNK_DIM_W),
-                                 (c_pos.y - c_beg.y) * WAR_CHUNK_DIM_H - (e_beg.y % WAR_CHUNK_DIM_H));
-    return r;
 }
 
 internal void world_update_player_col(void)
@@ -237,8 +214,8 @@ internal void world_handle_input(void)
     }
     if (win->mouse.b1 == PRESS) {
         struct offset_u32 pos = world_screen_pos_to_elem(win->mouse.pos);
-        struct offset_s32 mov = OFFSET(s32, win->mouse.mov.x, win->mouse.mov.y);
-        pos = OFFSET_OP(u32, pos, mov, -);
+        struct offset_s32 mov = OFFSET(win->mouse.mov.x, win->mouse.mov.y, s32);
+        pos = OFFSET_OP(pos, mov, -, u32);
         world_edit_elem(pos, mov);
     }
 }
@@ -267,7 +244,8 @@ def_create_world(create_world)
     world->dcm.chunks = (typeof(world->dcm.chunks))(world->war.chunks + wcc);
     world->dcm.maps = (typeof(world->dcm.maps))(world->dcm.chunks + wcc);
     
-    world->player.pos = OFFSET(u32, world->war.dim.w * WAR_CHUNK_DIM_W / 2, world->war.dim.h * WAR_CHUNK_DIM_H / 2);
+    world->player.pos = OFFSET(world->war.dim.w * WAR_CHUNK_DIM_W / 2,
+                               world->war.dim.h * WAR_CHUNK_DIM_H / 2, u32);
     
     world->editor.elem.col = RGBA(255,255,255,255);
     world->editor.brush_width = 10;
@@ -285,7 +263,7 @@ def_world_update(world_update)
     world_update_player_col();
     world_handle_input();
     
-    gpu_add_draw_elem(world->player.col, OFFSET(u16, 65535 / 2, 65535 / 2));
+    gpu_add_draw_elem(world->player.col, OFFSET(65535 / 2, 65535 / 2, u16));
     
     struct offset_u32 e_beg = world_first_visible_elem();
     struct offset_u32 c_beg = world_elem_to_chunk(e_beg);
@@ -301,8 +279,8 @@ def_world_update(world_update)
     
     for(u32 ci = world_chunk_i(c_beg), stride = 1; ci < stop; ci += stride, stride = 1) {
         struct offset_u32 c_pos = world_chunk_i_to_ofs(ci);
-        struct offset_u32 e_ofs = OFFSET(u32,0,0);
-        struct extent_u32 e_ext = EXTENT(u32,WAR_CHUNK_DIM_W,WAR_CHUNK_DIM_H);
+        struct offset_u32 e_ofs = OFFSET(0,0,u32);
+        struct extent_u32 e_ext = EXTENT(WAR_CHUNK_DIM_W,WAR_CHUNK_DIM_H,u32);
         
         if (c_pos.x == c_end.x) {
             stride = row_end_stride;
@@ -324,7 +302,7 @@ def_world_update(world_update)
                 struct offset_u32 px = world_chunk_to_screen_px(c_pos);
                 px.x += i;
                 px.y += j;
-                struct offset_u16 nm = win_normalize_screen_px(CAST_OFFSET(u16, px));
+                struct offset_u16 nm = win_normalize_screen_px(CAST_OFFSET(px, u16));
                 gpu_add_draw_elem(c->elem[j][i].col, nm);
             }
         }
