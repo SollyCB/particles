@@ -73,16 +73,20 @@ static inline struct offset_u32* world_mouse_mov_to_elems(u32 *cnt)
     f32 sh_x = vec.x * f;
     f32 sh_y = vec.y * f;
     
-    u32 bi = p1.x;
-    u32 ei = p2.x;
-    if (bi > ei)
-        swap(bi,ei);
-    
-    for(f32 k = (f32)p1.y, h = (f32)bi;
-        k < (f32)p2.y && (u32)fabsf(h) < ei;
-        k += sh_y, h += sh_x)
-    {
-        *cnt += fill_circle(r, (u32)h, (u32)k, ret + *cnt);
+    if (sh_x > 0) {
+        for(f32 k = (f32)p1.y, h = (f32)p1.x;
+            k < (f32)p2.y && h < (f32)p2.x;
+            k += sh_y, h += sh_x)
+        {
+            *cnt += fill_circle(r, (u32)h, (u32)k, ret + *cnt);
+        }
+    } else {
+        for(f32 k = (f32)p1.y, h = (f32)p1.x;
+            k < (f32)p2.y && h > (f32)p2.x;
+            k += sh_y, h += sh_x)
+        {
+            *cnt += fill_circle(r, (u32)h, (u32)k, ret + *cnt);
+        }
     }
     
     return ret;
