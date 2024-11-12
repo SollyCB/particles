@@ -106,18 +106,10 @@ def_win_poll(win_poll)
                 win->mouse.mov.y = e.motion.yrel;
             } break;
             
-            case SDL_MOUSEBUTTONDOWN: {
-                if (SDL_BUTTON(e.button.button) == 1)
-                    win->mouse.buttons.b1 = PRESS;
-                if (SDL_BUTTON(e.button.button) == 2)
-                    win->mouse.buttons.b2 = PRESS;
-            } break;
-            
+            case SDL_MOUSEBUTTONDOWN:
             case SDL_MOUSEBUTTONUP: {
-                if (SDL_BUTTON(e.button.button) == 1)
-                    win->mouse.buttons.b1 = RELEASE;
-                if (SDL_BUTTON(e.button.button) == 2)
-                    win->mouse.buttons.b2 = RELEASE;
+                u8 action = e.type == SDL_MOUSEBUTTONDOWN ? PRESS : RELEASE;
+                win->mouse.buttons[e.button.button-1] = action;
             } break;
             
             case SDL_WINDOWEVENT: {

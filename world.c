@@ -18,39 +18,31 @@ static inline struct offset_u32 world_first_hidden_elem(void)
     return r;
 }
 
-static inline struct offset_u32 world_mouse_to_elem(void)
+inline_fn struct offset_u32 world_screen_pos_to_elem(struct offset_u32 pos)
 {
     struct offset_u32 r;
-    r.x = ((s32)win->mouse.pos.x - (win->dim.w / 2)) + world->player.pos.x;
-    r.y = ((s32)win->mouse.pos.y - (win->dim.h / 2)) + world->player.pos.y;
+    r.x = ((s32)pos.x - (win->dim.w / 2)) + world->player.pos.x;
+    r.y = ((s32)pos.y - (win->dim.h / 2)) + world->player.pos.y;
     return r;
 }
 
-static inline struct offset_u32* world_mouse_to_elems(u32 *cnt)
+static inline struct offset_u32* world_pos_to_elems(struct offset_u32 pos, u32 *cnt)
 {
-    u32 h = ((s32)win->mouse.pos.x - (win->dim.w / 2)) + world->player.pos.x;
-    u32 k = ((s32)win->mouse.pos.y - (win->dim.h / 2)) + world->player.pos.y;
+    u32 h = pos.x;
+    u32 k = pos.y;
     s32 r = world->editor.brush_width;
     struct offset_u32 *ret = salloc(MT, sizeof(*ret) * r * r);
     *cnt = fill_circle(r, h, k, ret);
     return ret;
 }
 
-static inline struct offset_u32* world_mouse_mov_to_elems(u32 *cnt)
+static inline struct offset_u32* world_mov_to_elems(struct offset_u32 pos, struct offset_s32 mov, u32 *cnt)
 {
-    u32 x2 = win->mouse.pos.x;
-    u32 y2 = win->mouse.pos.y;
-    u32 x1 = win->mouse.pos.x - win->mouse.mov.x;
-    u32 y1 = win->mouse.pos.y - win->mouse.mov.y;
+    struct offset_s32 p1 = OFFSET(s32, (s32)pos.x, (s32)pos.y);
+    struct offset_s32 p2 = OFFSET(s32, (s32)pos.x + mov.x, (s32)pos.y + mov.y);
     
-    u32 l = (u32)sqrtf((f32)((x2-x1)*(x2-x1) + (y2-y1)*(y2-y1)));
+    u32 l = (u32)sqrtf((f32)((p2.x-p1.x)*(p2.x-p1.x) + (p2.y-p1.y)*(p2.y-p1.y)));
     struct offset_u32 *ret = salloc(MT, sizeof(*ret) * world->editor.brush_width * l);
-    
-    struct offset_s32 p1,p2;
-    p1.x = ((s32)x1 - (win->dim.w / 2)) + world->player.pos.x;
-    p1.y = ((s32)y1 - (win->dim.h / 2)) + world->player.pos.y;
-    p2.x = ((s32)x2 - (win->dim.w / 2)) + world->player.pos.x;
-    p2.y = ((s32)y2 - (win->dim.h / 2)) + world->player.pos.y;
     
     *cnt = 0;
     s32 r = (s32)world->editor.brush_width;
@@ -165,25 +157,23 @@ internal void world_save(void)
     return;
 }
 
-internal void world_edit_elem(void)
+internal void world_edit_elem(struct offset_u32 pos, struct offset_s32 mov)
 {
-    u32 scr_x = world->player.pos.x - win->dim.w / 2;
-    u32 scr_y = world->player.pos.y - win->dim.h / 2;
-    u32 scr_w = world->player.pos.x + win->dim.w / 2;
-    u32 scr_h = world->player.pos.y + win->dim.h / 2;
+    struct offset_u32 min = world_first_visible_elem();
+    struct offset_u32 max = world_first_hidden_elem();
     
     u32 cnt;
     struct offset_u32 *arr;
-    if (win->mouse.mov.x || win->mouse.mov.y)
-        arr = world_mouse_mov_to_elems(&cnt);
+    if (mov.x || mov.y)
+        arr = world_mov_to_elems(pos, mov, &cnt);
     else
-        arr = world_mouse_to_elems(&cnt);
+        arr = world_pos_to_elems(pos, &cnt);
     
     for(u32 i = 0; i < cnt; ++i) {
         struct offset_u32 e_pos = arr[i];
         
-        if (e_pos.x < scr_x || e_pos.x >= scr_w ||
-            e_pos.y < scr_y || e_pos.y >= scr_h)
+        if (e_pos.x < min.x || e_pos.x >= max.x ||
+            e_pos.y < min.y || e_pos.y >= max.y)
         {
             continue;
         }
@@ -198,9 +188,6 @@ internal void world_edit_elem(void)
 
 internal void world_handle_input(void)
 {
-    if (win->mouse.buttons.b1 == PRESS)
-        world_edit_elem();
-    
     u8 col_step = 10;
     
     struct window_input ki;
@@ -247,6 +234,12 @@ internal void world_handle_input(void)
             
             default: break;
         }
+    }
+    if (win->mouse.b1 == PRESS) {
+        struct offset_u32 pos = world_screen_pos_to_elem(win->mouse.pos);
+        struct offset_s32 mov = OFFSET(s32, win->mouse.mov.x, win->mouse.mov.y);
+        pos = OFFSET_OP(u32, pos, mov, -);
+        world_edit_elem(pos, mov);
     }
 }
 

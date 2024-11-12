@@ -55,9 +55,11 @@ struct win {
     struct {
         struct offset_u32 pos;
         struct offset_s32 mov;
-        struct {
-            u8 b1,b2;
-        } buttons;
+        
+        union {
+            u8 buttons[4];
+            struct { u8 b1,b2,b3,b4; };
+        };
     } mouse;
     
     u32 flags; // enum win_flags
