@@ -39,7 +39,34 @@ struct window_input {
     };
 };
 
+struct mouse_button {
+    union {
+        u8 buttons[4];
+        struct { u8 b1,b2,b3,b4; };
+    };
+    struct offset_u32 pos;
+    u32 i,time;
+};
+
+enum mouse_button_indices {
+    MOUSE_BUTTON_1,
+    MOUSE_BUTTON_2,
+    MOUSE_BUTTON_3,
+    MOUSE_BUTTON_4,
+};
+#define set_mouse_button_pressed(button_state, button_index) (button_state |= (1 << (button_index)))
+#define unset_mouse_button_pressed(button_state, button_index) (button_state |= ~(1 << (button_index)))
+#define is_mouse_button_pressed(button_state, button_index) (button_state & (1<<(button_index)))
+
+struct mouse_motion {
+    struct offset_u32 pos;
+    struct offset_s32 mov;
+    u32 button_state;
+    u32 time;
+};
+
 #define KEY_BUFFER_SIZE 64
+#define MOUSE_BUFFER_SIZE 16
 
 struct win {
     SDL_Window *handle;
@@ -53,13 +80,12 @@ struct win {
     } input; // keyboard input ring buffer
     
     struct {
-        struct offset_u32 pos;
-        struct offset_s32 mov;
-        
-        union {
-            u8 buttons[4];
-            struct { u8 b1,b2,b3,b4; };
-        };
+        struct mouse_motion current_motion;
+        struct mouse_button current_button;
+        struct mouse_motion motion_buffer[MOUSE_BUFFER_SIZE];
+        struct mouse_button button_buffer[MOUSE_BUFFER_SIZE];
+        u32 motion_buffer_size;
+        u32 button_buffer_size;
     } mouse;
     
     u32 flags; // enum win_flags

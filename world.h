@@ -3,54 +3,30 @@
 
 #include "../solh/sol.h"
 
-enum world_elem_modifiers {
-    // types
+enum world_elem_types {
     WEM_TYPE_VOID,
     WEM_TYPE_ROCK,
     WEM_TYPE_CNT,
-    
-    // states
-    WEM_STATE_UPDATE = 0x0100,
-    WEM_STATE_WET = 0x0200,
-    
-    WEM_PRESERVE_TYPE = 0x00ff,
+};
+enum world_elem_states {
+    WEM_STATE_NONE = 0x00,
+    WEM_STATE_UPDATE = 0x01,
+    WEM_STATE_WET = 0x02,
 };
 
-struct msvc_align(16) world_elem {
-    struct offset_u16 pos; // relative to chunk
+struct world_elem {
     struct rgba col;
-    
-    // Be very careful accessing directly. It is very easy to accidentally modify
-    // type when trying to set the state, and vice versa. Prefer the below accessors.
-    // This is a very good example of where 'private' would be useful LOL!
-    union {
-        u16 type; // low 16 bits
-        u64 state; // top 48 bits
-    };
-} gcc_align(16);
-
-static inline void wem_set_type(struct world_elem *e, u8 type)
-{
-    e->type = type;
-}
-
-static inline void wem_add_state(struct world_elem *e, u32 state)
-{
-    e->state |= state|WEM_PRESERVE_TYPE;
-}
-
-static inline void wem_rm_state(struct world_elem *e, u32 state)
-{
-    e->state &= (~state)|WEM_PRESERVE_TYPE;
-}
-
-static inline void wem_clear_state(struct world_elem *e)
-{
-    e->state &= WEM_PRESERVE_TYPE;
-}
+    u32 type;
+    u64 state;
+}; // 16 bytes
 
 #define WAR_CHUNK_DIM_W 128
 #define WAR_CHUNK_DIM_H 128
+
+// could go 64 bit player.pos and edit some coordinate calculations,
+// but 2 billion elements across I think is fine.
+#define WORLD_DIM_W ((u32)align(billion(2), WAR_CHUNK_DIM_W))
+#define WORLD_DIM_H ((u32)align(billion(2), WAR_CHUNK_DIM_H))
 
 struct world_chunk {
     struct world_elem elem[WAR_CHUNK_DIM_H][WAR_CHUNK_DIM_W];
@@ -64,8 +40,8 @@ struct world {
     os_fd fd;
     
     struct {
-        struct extent_u32 dim;
-        struct offset_u32 ofs;
+        struct extent_u32 dim; // chunks
+        struct offset_u32 ofs; // chunks
         struct world_chunk *chunks;
     } war; // world active region - chunks loaded from disk
     

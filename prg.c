@@ -127,6 +127,8 @@ def_prg_update(prg_update)
     
     /* update */
     world_update();
+    
+    
     gpu_update();
     
     /* end frame */

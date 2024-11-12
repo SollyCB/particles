@@ -72,7 +72,17 @@ def_win_create_surf(win_create_surf)
 def_win_poll(win_poll)
 {
     win->flags &= ~WIN_SZ;
-    memset(&win->mouse.mov, 0, sizeof(win->mouse.mov));
+    
+    memset(&win->mouse.current_motion.mov, 0, sizeof(win->mouse.current_motion.mov));
+    for(u32 i=0; i <  cl_array_size(win->mouse.current_button.buttons); ++i) {
+        if (win->mouse.current_button.buttons[i] == RELEASE)
+            win->mouse.current_button.buttons[i] = 0x0;
+    }
+    
+    memset(&win->mouse.motion_buffer, 0, sizeof(win->mouse.motion_buffer));
+    memset(&win->mouse.button_buffer, 0, sizeof(win->mouse.button_buffer));
+    win->mouse.motion_buffer_size = 0;
+    win->mouse.button_buffer_size = 0;
     
     SDL_Event e;
     while(SDL_PollEvent(&e) || (win->flags & WIN_MIN)) {
@@ -100,16 +110,31 @@ def_win_poll(win_poll)
             } break;
             
             case SDL_MOUSEMOTION: {
-                win->mouse.pos.x = e.motion.x;
-                win->mouse.pos.y = e.motion.y;
-                win->mouse.mov.x = e.motion.xrel;
-                win->mouse.mov.y = e.motion.yrel;
+                win->mouse.current_motion.pos.x = e.motion.x;
+                win->mouse.current_motion.pos.y = e.motion.y;
+                win->mouse.current_motion.mov.x = e.motion.xrel;
+                win->mouse.current_motion.mov.y = e.motion.yrel;
+                win->mouse.current_motion.button_state = e.motion.state;
+                win->mouse.current_motion.time = e.motion.timestamp;
+                
+                u32 i = win->mouse.motion_buffer_size;
+                win->mouse.motion_buffer[i] = win->mouse.current_motion;
+                ++win->mouse.motion_buffer_size;
             } break;
             
             case SDL_MOUSEBUTTONDOWN:
             case SDL_MOUSEBUTTONUP: {
                 u8 action = e.type == SDL_MOUSEBUTTONDOWN ? PRESS : RELEASE;
-                win->mouse.buttons[e.button.button-1] = action;
+                u32 i = win->mouse.button_buffer_size;
+                
+                win->mouse.current_button.buttons[e.button.button-1] = action;
+                win->mouse.current_button.pos.x = e.button.x;
+                win->mouse.current_button.pos.y = e.button.y;
+                win->mouse.current_button.i = e.button.button-1;
+                win->mouse.current_button.time = action;
+                
+                win->mouse.button_buffer[i] = win->mouse.current_button;
+                ++win->mouse.button_buffer_size;
             } break;
             
             case SDL_WINDOWEVENT: {

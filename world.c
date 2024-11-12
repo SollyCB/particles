@@ -2,48 +2,62 @@
 
 #define WORLD_FILE_URI "world.bin"
 
+inline_fn struct offset_u32 world_war_midpoint(void)
+{
+    return OFFSET(WAR_CHUNK_DIM_W * world->war.dim.w / 2,
+                  WAR_CHUNK_DIM_H * world->war.dim.h / 2, u32);
+}
+
+// first war coordinates that are inside the window
 inline_fn struct offset_u32 world_first_visible_elem(void) {
-    return OFFSET(world->player.pos.x - (win->dim.w / 2),
-                  world->player.pos.y - (win->dim.h / 2), u32);
+    return OFFSET(world_war_midpoint().x - (win->dim.w / 2),
+                  world_war_midpoint().y - (win->dim.h / 2), u32);
 }
 
+// first war coordinates that are outside the window
 inline_fn struct offset_u32 world_first_hidden_elem(void) {
-    return OFFSET(world->player.pos.x + (win->dim.w / 2),
-                  world->player.pos.y + (win->dim.h / 2), u32);
+    return OFFSET(world_war_midpoint().x + (win->dim.w / 2),
+                  world_war_midpoint().y + (win->dim.h / 2), u32);
 }
 
+// screen coordinates to war coordinates
 inline_fn struct offset_u32 world_screen_pos_to_elem(struct offset_u32 pos) {
-    return OFFSET(((s32)pos.x - (win->dim.w / 2)) + world->player.pos.x,
-                  ((s32)pos.y - (win->dim.h / 2)) + world->player.pos.y, u32);
+    return OFFSET(((s32)pos.x - (win->dim.w / 2)) + world_war_midpoint().x,
+                  ((s32)pos.y - (win->dim.h / 2)) + world_war_midpoint().y, u32);
 }
 
+// convert chunk coordinates to index for accessing war.chunks
 inline_fn u32 world_chunk_i(struct offset_u32 p) {
     u32 x = ((p.x + world->war.ofs.x) % world->war.dim.w);
     u32 y = ((p.y + world->war.ofs.y) % world->war.dim.h) * world->war.dim.w;
     return x + y;
 }
 
+// convert an index returned from world_chunk_i back to coordinates
 inline_fn struct offset_u32 world_chunk_i_to_ofs(u32 i) {
     return OFFSET(((i % world->war.dim.w) + (world->war.dim.w - world->war.ofs.x)) % world->war.dim.w,
                   ((i / world->war.dim.w) + (world->war.dim.h - world->war.ofs.y)) % world->war.dim.h, u32);
 }
 
-inline_fn u32 world_elem_chunk_x(u32 x) { return x % WAR_CHUNK_DIM_W; }
-
-inline_fn u32 world_elem_chunk_y(u32 y) { return y % WAR_CHUNK_DIM_H; }
-
+// chunk coordinates to a chunk reference
 inline_fn struct world_chunk* world_chunk_from_war(struct offset_u32 p) {
     return &world->war.chunks[world_chunk_i(p)];
 }
 
+// war coordinates to the coordinates of its parent chunk
 inline_fn struct offset_u32 world_elem_to_chunk(struct offset_u32 p) {
     return OFFSET(p.x / WAR_CHUNK_DIM_W, p.y / WAR_CHUNK_DIM_H, u32);
 }
 
+inline_fn u32 world_elem_chunk_x(u32 x) { return x % WAR_CHUNK_DIM_W; }
+inline_fn u32 world_elem_chunk_y(u32 y) { return y % WAR_CHUNK_DIM_H; }
+
+// war coordinates to an element reference using its parent chunk
 inline_fn struct world_elem* world_elem_from_chunk(struct world_chunk *c, struct offset_u32 p) {
     return &c->elem[world_elem_chunk_y(p.y)][world_elem_chunk_x(p.x)];
 }
 
+// convert chunk coordinates to screen coordinates in pixels
 inline_fn struct offset_u32 world_chunk_to_screen_px(struct offset_u32 c_pos) {
     struct offset_u32 e_beg = world_first_visible_elem();
     struct offset_u32 c_beg = world_elem_to_chunk(e_beg);
@@ -51,16 +65,19 @@ inline_fn struct offset_u32 world_chunk_to_screen_px(struct offset_u32 c_pos) {
                   (c_pos.y - c_beg.y) * WAR_CHUNK_DIM_H - (e_beg.y % WAR_CHUNK_DIM_H), u32);
 }
 
+// draw a circle of radius world.editor.brush_width centred on war coordinates
 internal struct offset_u32* world_pos_to_elems(struct offset_u32 pos, u32 *cnt)
 {
     u32 h = pos.x;
     u32 k = pos.y;
-    s32 r = world->editor.brush_width;
-    struct offset_u32 *ret = salloc(MT, sizeof(*ret) * r * r);
+    f32 r = (f32)world->editor.brush_width / 2;
+    struct offset_u32 *ret = salloc(MT, sizeof(*ret) * (u32)ceilf(r) * (u32)ceilf(r));
     *cnt = fill_circle(r, h, k, ret);
     return ret;
 }
 
+// travel from 'pos' to 'pos + mov', stepping by radius 'world.editor.brush_width', and drawing a circle
+// at each step whose centre lies on 'mov', and whose radius is also 'world.editor.brush_width'
 internal struct offset_u32* world_mov_to_elems(struct offset_u32 pos, struct offset_s32 mov, u32 *cnt)
 {
     struct offset_s32 p1 = OFFSET((s32)pos.x, (s32)pos.y, s32);
@@ -70,7 +87,7 @@ internal struct offset_u32* world_mov_to_elems(struct offset_u32 pos, struct off
     struct offset_u32 *ret = salloc(MT, sizeof(*ret) * world->editor.brush_width * l);
     
     *cnt = 0;
-    s32 r = (s32)world->editor.brush_width;
+    f32 r = (f32)world->editor.brush_width / 2;
     
     if (p1.y > p2.y)
         swap(p1,p2);
@@ -109,6 +126,7 @@ internal struct offset_u32* world_mov_to_elems(struct offset_u32 pos, struct off
     return ret;
 }
 
+// just a random flashing point for now
 internal void world_update_player_col(void)
 {
     local_persist s8 dir = -3;
@@ -124,16 +142,19 @@ internal void world_update_player_col(void)
     col[i] += dir;
 }
 
+// load chunks from the world file
 internal void world_load(void)
 {
     return;
 }
 
+// write chunks to the world file
 internal void world_save(void)
 {
     return;
 }
 
+// edit the elements between 'pos' and 'pos + mov' using the world.editor config
 internal void world_edit_elem(struct offset_u32 pos, struct offset_s32 mov)
 {
     struct offset_u32 min = world_first_visible_elem();
@@ -212,11 +233,23 @@ internal void world_handle_input(void)
             default: break;
         }
     }
-    if (win->mouse.b1 == PRESS) {
-        struct offset_u32 pos = world_screen_pos_to_elem(win->mouse.pos);
-        struct offset_s32 mov = OFFSET(win->mouse.mov.x, win->mouse.mov.y, s32);
-        pos = OFFSET_OP(pos, mov, -, u32);
-        world_edit_elem(pos, mov);
+    if (win->mouse.motion_buffer_size > 0) {
+        for(u32 i=0; i < win->mouse.motion_buffer_size; ++i) {
+            if (is_mouse_button_pressed(win->mouse.motion_buffer[i].button_state, MOUSE_BUTTON_1)) {
+                struct offset_u32 pos = world_screen_pos_to_elem(win->mouse.motion_buffer[i].pos);
+                struct offset_s32 mov = OFFSET(win->mouse.motion_buffer[i].mov.x,
+                                               win->mouse.motion_buffer[i].mov.y, s32);
+                pos = OFFSET_OP(pos, mov, -, u32);
+                world_edit_elem(pos, mov);
+            }
+        }
+    } else if (win->mouse.button_buffer_size > 0) {
+        for(u32 i=0; i < win->mouse.button_buffer_size; ++i) {
+            if (win->mouse.button_buffer[i].b1 == PRESS) {
+                struct offset_u32 pos = world_screen_pos_to_elem(win->mouse.button_buffer[i].pos);
+                world_edit_elem(pos, OFFSET(0,0,s32));
+            }
+        }
     }
 }
 
@@ -233,24 +266,23 @@ def_create_world(create_world)
     
     u32 wcc = world->war.dim.w * world->war.dim.h;
     
-    u64 war_size = wcc * sizeof(*world->war.chunks);
+    u64 war_size = wcc * (sizeof(*world->war.chunks));
     u64 dcm_size = wcc * (sizeof(*world->dcm.chunks) + sizeof(*world->dcm.maps));
     
-    println("\nWorld active region memory requirements (%ux%u screen)", win->max.w, win->max.h);
-    println("  chunk pool:        %fmb", (f64)war_size / mb(1));
+    println("\nWorld active region memory requirements (%ux%u screen)", (u64)win->max.w, (u64)win->max.h);
+    println("  war chunk array:   %fmb", (f64)war_size / mb(1));
     println("  dynamic chunk map: %fmb", (f64)dcm_size / mb(1));
     
     world->war.chunks = palloc(MT, war_size + dcm_size);
     world->dcm.chunks = (typeof(world->dcm.chunks))(world->war.chunks + wcc);
     world->dcm.maps = (typeof(world->dcm.maps))(world->dcm.chunks + wcc);
     
-    world->player.pos = OFFSET(world->war.dim.w * WAR_CHUNK_DIM_W / 2,
-                               world->war.dim.h * WAR_CHUNK_DIM_H / 2, u32);
+    world->player.pos = OFFSET(WORLD_DIM_W / 2, WORLD_DIM_H / 2, u32);
     
     world->editor.elem.col = RGBA(255,255,255,255);
-    world->editor.brush_width = 10;
-    wem_set_type(&world->editor.elem, WEM_TYPE_ROCK);
-    wem_clear_state(&world->editor.elem);
+    world->editor.brush_width = 1;
+    world->editor.elem.type = WEM_TYPE_ROCK;
+    world->editor.elem.state = WEM_STATE_NONE;
     
     return 0;
 }
